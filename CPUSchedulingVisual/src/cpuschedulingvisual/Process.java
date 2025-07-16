@@ -8,18 +8,21 @@ package cpuschedulingvisual;
  *
  * @author Admin
  */
-   public class Process {
+public class Process {
     public String pid;
     public int arrivalTime;
     public int burstTime;
+    public int remainingTime;
     public int completionTime;
-    public int turnaroundTime;
-    public int waitingTime;
-    public int responseTime;
+    public int startTime;
+    public int queueLevel;  // For MLFQ
 
-    public Process(String pid, int at, int bt) {
+    public Process(String pid, int arrivalTime, int burstTime) {
         this.pid = pid;
-        this.arrivalTime = at;
-        this.burstTime = bt;
+        this.arrivalTime = arrivalTime;
+        this.burstTime = burstTime;
+        this.remainingTime = burstTime;
+        this.startTime = -1;
+        this.queueLevel = 0;
     }
 }
