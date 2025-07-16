@@ -32,7 +32,7 @@ public class Main {
         int choice = sc.nextInt();
 
         if (choice == 1) {
-            CPUScheduler.fifo(processes)
+            CPUScheduler.fifo(processes);
         } else {
             System.out.println("Invalid choice.");
         }
