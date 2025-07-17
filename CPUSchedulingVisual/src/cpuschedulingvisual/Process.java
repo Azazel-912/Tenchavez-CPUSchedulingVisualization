@@ -12,15 +12,18 @@ package cpuschedulingvisual;
     /**
      *
      */
-     public class Process {
+    public class Process {
+
+    static void add(Process process) {
+        throw new UnsupportedOperationException("Not supported yet."); // Generated from nbfs://nbhost/SystemFileSystem/Templates/Classes/Code/GeneratedMethodBody
+    }
     public String pid;
     public int arrivalTime;
     public int burstTime;
     public int remainingTime;
     public int waitingTime;
     public int turnaroundTime;
-    public int priority;
-    public int queueLevel; // for MLFQ
+    public int priority; // optional: for MLFQ or priority-based scheduling
 
     public Process(String pid, int arrivalTime, int burstTime) {
         this.pid = pid;
@@ -30,16 +33,16 @@ package cpuschedulingvisual;
         this.waitingTime = 0;
         this.turnaroundTime = 0;
         this.priority = 0;
-        this.queueLevel = 0;
     }
 
-    public Process copy() {
-        Process p = new Process(this.pid, this.arrivalTime, this.burstTime);
-        p.remainingTime = this.remainingTime;
-        p.waitingTime = this.waitingTime;
-        p.turnaroundTime = this.turnaroundTime;
-        p.priority = this.priority;
-        p.queueLevel = this.queueLevel;
-        return p;
+    // Optional constructor for priority
+    public Process(String pid, int arrivalTime, int burstTime, int priority) {
+        this(pid, arrivalTime, burstTime);
+        this.priority = priority;
     }
-}
+
+    // Add any helper methods if needed
+    public Process copy() {
+        return new Process(pid, arrivalTime, burstTime, priority);
+    }
+} 

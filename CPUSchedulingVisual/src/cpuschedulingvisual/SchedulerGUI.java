@@ -8,100 +8,108 @@ package cpuschedulingvisual;
  *
  * @author Admin
  */
-// File: SchedulerGUI.java
+import java.util.List;
+import java.util.ArrayList;
 import javax.swing.*;
+import javax.swing.table.DefaultTableModel;
 import java.awt.*;
 import java.awt.event.*;
 import java.util.*;
-import java.util.List;
-import java.util.ArrayList;
-
-
 
 public class SchedulerGUI extends JFrame {
+    private final JTable processTable;
+    private DefaultTableModel tableModel;
     private JTextArea outputArea;
-    private JComboBox<String> algoComboBox;
-    private JTextField quantumField;
-    private JTable processTable;
-    private DefaultListModel<Process> processList;
+    private JPanel ganttPanel;
 
     public SchedulerGUI() {
         setTitle("CPU Scheduling Visualizer");
         setSize(900, 600);
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-        setLocationRelativeTo(null);
-        getContentPane().setBackground(new Color(255, 253, 208)); // Cream background
-        initComponents();
-    }
-
-    private void initComponents() {
         setLayout(new BorderLayout());
 
-        // Top Panel
-        JPanel topPanel = new JPanel(new FlowLayout());
-        topPanel.setBackground(new Color(255, 253, 208));
+        // Cream-colored theme
+        Color cream = new Color(255, 253, 208);
+        getContentPane().setBackground(cream);
 
-        algoComboBox = new JComboBox<>(new String[]{"FIFO", "SJF", "SRTF", "RR", "MLFQ"});
-        quantumField = new JTextField(5);
-        JButton runBtn = new JButton("Run");
-        JButton exportBtn = new JButton("Export");
-
-        topPanel.add(new JLabel("Algorithm:"));
-        topPanel.add(algoComboBox);
-        topPanel.add(new JLabel("Quantum (if RR/MLFQ):"));
-        topPanel.add(quantumField);
+        // Top Panel - Buttons
+        JPanel topPanel = new JPanel();
+        topPanel.setBackground(cream);
+        JButton addBtn = new JButton("Add Process");
+        JButton generateBtn = new JButton("Generate Sample");
+        JButton runBtn = new JButton("Run Scheduler");
+        topPanel.add(addBtn);
+        topPanel.add(generateBtn);
         topPanel.add(runBtn);
-        topPanel.add(exportBtn);
-
-        // Center Panel
-        outputArea = new JTextArea();
-        outputArea.setEditable(false);
-        JScrollPane scrollPane = new JScrollPane(outputArea);
-
-        // Dummy input process table (optional input UI)
-        JPanel inputPanel = new JPanel(new BorderLayout());
-        inputPanel.setBackground(new Color(255, 253, 208));
-        inputPanel.add(new JLabel("Output:"), BorderLayout.NORTH);
-        inputPanel.add(scrollPane, BorderLayout.CENTER);
-
         add(topPanel, BorderLayout.NORTH);
-        add(inputPanel, BorderLayout.CENTER);
 
-        runBtn.addActionListener((ActionEvent e) -> {
-            runScheduler();
+        // Center Panel - Table + Output
+        tableModel = new DefaultTableModel(new Object[]{"PID", "Arrival", "Burst"}, 0);
+        processTable = new JTable(tableModel);
+        JScrollPane tableScroll = new JScrollPane(processTable);
+
+        outputArea = new JTextArea(10, 40);
+        outputArea.setEditable(false);
+        JScrollPane outputScroll = new JScrollPane(outputArea);
+
+        JPanel centerPanel = new JPanel(new GridLayout(2, 1));
+        centerPanel.add(tableScroll);
+        centerPanel.add(outputScroll);
+        add(centerPanel, BorderLayout.CENTER);
+
+        // Bottom Panel - Gantt
+        ganttPanel = new JPanel() {
+            @Override
+            protected void paintComponent(Graphics g) {
+                super.paintComponent(g);
+                drawGanttChart(g);
+            }
+        };
+        ganttPanel.setPreferredSize(new Dimension(800, 80));
+        ganttPanel.setBackground(Color.WHITE);
+        add(ganttPanel, BorderLayout.SOUTH);
+
+        // Add Process
+        addBtn.addActionListener(e -> {
+            tableModel.addRow(new Object[]{"P" + (tableModel.getRowCount() + 1), 0, 1});
         });
 
-        exportBtn.addActionListener((ActionEvent e) -> {
-            Scheduler.exportToFile(outputArea.getText());
+        // Generate Sample
+        generateBtn.addActionListener(e -> {
+            tableModel.setRowCount(0);
+            tableModel.addRow(new Object[]{"P1", 0, 5});
+            tableModel.addRow(new Object[]{"P2", 1, 3});
+            tableModel.addRow(new Object[]{"P3", 2, 8});
+            tableModel.addRow(new Object[]{"P4", 3, 6});
+        });
+
+        // Run Scheduler
+        runBtn.addActionListener(e -> {
+            List<Process> processes = new ArrayList<>();  // Correct instantiation
+            for (int i = 0; i < tableModel.getRowCount(); i++) {
+                String pid = tableModel.getValueAt(i, 0).toString();
+                int arrival = Integer.parseInt(tableModel.getValueAt(i, 1).toString());
+                int burst = Integer.parseInt(tableModel.getValueAt(i, 2).toString());
+                processes.add(new Process(pid, arrival, burst));
+            }
+            StringBuilder output = new StringBuilder();
+            output.append("=== FIFO ===\n").append(Scheduler.fifoOutput(processes)).append("\n\n");
+            output.append("=== SJF ===\n").append(Scheduler.sjfOutput(processes)).append("\n\n");
+            output.append("=== SRTF ===\n").append(Scheduler.srtfOutput(processes)).append("\n\n");
+            output.append("=== RR ===\n").append(Scheduler.rrOutput(processes, 4)).append("\n\n");
+            output.append("=== MLFQ ===\n").append(Scheduler.mlfqOutput(processes)).append("\n\n");
+
+            outputArea.setText(output.toString());
+            ganttPanel.repaint();
         });
     }
 
-    private void runScheduler() {
-        String selected = (String) algoComboBox.getSelectedItem();
-        String quantumText = quantumField.getText();
-        int quantum = 1;
-        try {
-            if (!quantumText.isEmpty()) {
-                quantum = Integer.parseInt(quantumText);
-            }
-        } catch (NumberFormatException ex) {
-            JOptionPane.showMessageDialog(this, "Invalid quantum value.");
-            return;
-        }
-
-        List<Process> processes = Scheduler.defaultProcesses();
-
-        String result = "";
-        if (null != selected) switch (selected) {
-            case "FIFO" -> result = Scheduler.fifo(processes);
-            case "SJF" -> result = Scheduler.sjf(processes);
-            case "SRTF" -> result = Scheduler.srtf(processes);
-            case "RR" -> result = Scheduler.roundRobin(processes, quantum);
-            case "MLFQ" -> result = Scheduler.mlfq(processes, quantum);
-            default -> {
-            }
-        }
-
-        outputArea.setText(result);
+    private void drawGanttChart(Graphics g) {
+        // Simple placeholder chart - expand if needed
+        g.setColor(Color.BLUE);
+        g.fillRect(10, 20, 100, 30);
+        g.setColor(Color.BLACK);
+        g.drawString("Sample", 15, 40);
     }
+
 }

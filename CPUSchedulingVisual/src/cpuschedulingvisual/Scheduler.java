@@ -190,4 +190,31 @@ public class Scheduler {
             JOptionPane.showMessageDialog(null, "Failed to export: " + e.getMessage());
         }
     }
+
+    static AbstractStringBuilder fifoOutput(List<Process> processes) {
+        throw new UnsupportedOperationException("Not supported yet."); // Generated from nbfs://nbhost/SystemFileSystem/Templates/Classes/Code/GeneratedMethodBody
+    }
+
+    static AbstractStringBuilder sjfOutput(List<Process> processes) {
+        throw new UnsupportedOperationException("Not supported yet."); // Generated from nbfs://nbhost/SystemFileSystem/Templates/Classes/Code/GeneratedMethodBody
+    }
+
+    static AbstractStringBuilder rrOutput(List<Process> processes, int i) {
+        throw new UnsupportedOperationException("Not supported yet."); // Generated from nbfs://nbhost/SystemFileSystem/Templates/Classes/Code/GeneratedMethodBody
+    }
+
+    static AbstractStringBuilder mlfqOutput(List<Process> processes) {
+        throw new UnsupportedOperationException("Not supported yet."); // Generated from nbfs://nbhost/SystemFileSystem/Templates/Classes/Code/GeneratedMethodBody
+    }
+
+    static AbstractStringBuilder srtfOutput(List<Process> processes) {
+        throw new UnsupportedOperationException("Not supported yet."); // Generated from nbfs://nbhost/SystemFileSystem/Templates/Classes/Code/GeneratedMethodBody
+    }
+
+    private static class AbstractStringBuilder {
+
+        public AbstractStringBuilder() {
+        }
+    }
+
 }
