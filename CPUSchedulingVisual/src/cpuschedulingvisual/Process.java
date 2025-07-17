@@ -8,21 +8,38 @@ package cpuschedulingvisual;
  *
  * @author Admin
  */
-public class Process {
+// File: MyProcess.java
+    /**
+     *
+     */
+     public class Process {
     public String pid;
     public int arrivalTime;
     public int burstTime;
     public int remainingTime;
-    public int completionTime;
-    public int startTime;
-    public int queueLevel;  // For MLFQ
+    public int waitingTime;
+    public int turnaroundTime;
+    public int priority;
+    public int queueLevel; // for MLFQ
 
     public Process(String pid, int arrivalTime, int burstTime) {
         this.pid = pid;
         this.arrivalTime = arrivalTime;
         this.burstTime = burstTime;
         this.remainingTime = burstTime;
-        this.startTime = -1;
+        this.waitingTime = 0;
+        this.turnaroundTime = 0;
+        this.priority = 0;
         this.queueLevel = 0;
+    }
+
+    public Process copy() {
+        Process p = new Process(this.pid, this.arrivalTime, this.burstTime);
+        p.remainingTime = this.remainingTime;
+        p.waitingTime = this.waitingTime;
+        p.turnaroundTime = this.turnaroundTime;
+        p.priority = this.priority;
+        p.queueLevel = this.queueLevel;
+        return p;
     }
 }

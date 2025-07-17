@@ -8,8 +8,13 @@ package cpuschedulingvisual;
  *
  * @author Admin
  */
+import javax.swing.SwingUtilities;
+
 public class Main {
     public static void main(String[] args) {
-        SchedulerGUI schedulerGUI = new SchedulerGUI();
+        SwingUtilities.invokeLater(() -> {
+            SchedulerGUI gui = new SchedulerGUI();
+            gui.setVisible(true);
+        });
     }
 }

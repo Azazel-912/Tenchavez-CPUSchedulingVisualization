@@ -8,206 +8,186 @@ package cpuschedulingvisual;
  *
  * @author Admin
  */
+// Scheduler.java
 import java.io.FileWriter;
-import java.io.PrintWriter;
-import java.text.SimpleDateFormat;
+import java.io.IOException;
 import java.util.*;
+import javax.swing.JOptionPane;
 
 public class Scheduler {
 
-    public static void fifo(List<Process> list, StringBuilder out) {
-        list.sort(Comparator.comparingInt(p -> p.arrivalTime));
+    public static List<Process> defaultProcesses() {
+        return Arrays.asList(
+            new Process("P1", 0, 8),
+            new Process("P2", 1, 4),
+            new Process("P3", 2, 9),
+            new Process("P4", 3, 5)
+        );
+    }
+
+    public static String fifo(List<Process> plist) {
+        plist.sort(Comparator.comparingInt(p -> p.arrivalTime));
         int time = 0;
-        for (Process p : list) {
+        StringBuilder out = new StringBuilder("FIFO:\n");
+
+        for (Process p : plist) {
             if (time < p.arrivalTime) time = p.arrivalTime;
-            p.startTime = time;
+            p.waitingTime = time - p.arrivalTime;
             time += p.burstTime;
-            p.completionTime = time;
+            p.turnaroundTime = p.waitingTime + p.burstTime;
+            out.append(p.pid).append(": WT=").append(p.waitingTime).append(", TAT=").append(p.turnaroundTime).append("\n");
         }
-        print(list, out);
+        return out.toString();
     }
 
-    // ========== SJF ===========
-    public static void sjf(List<Process> list, StringBuilder out) {
-        List<Process> temp = new ArrayList<>(list);
-        List<Process> done = new ArrayList<>();
-        int time = 0;
+    public static String sjf(List<Process> plist) {
+        List<Process> processes = new ArrayList<>(plist);
+        processes.sort(Comparator.comparingInt(p -> p.burstTime));
+        return fifo(processes);
+    }
 
-        while (!temp.isEmpty()) {
-            Process shortest = null;
-            for (Process p : temp) {
-                if (p.arrivalTime <= time) {
-                    if (shortest == null || p.burstTime < shortest.burstTime) {
-                        shortest = p;
-                    }
+    public static String srtf(List<Process> plist) {
+        List<Process> processes = new ArrayList<>(plist);
+        int time = 0, complete = 0;
+        int n = processes.size();
+        int[] remaining = new int[n];
+        for (int i = 0; i < n; i++) remaining[i] = processes.get(i).burstTime;
+        int[] wt = new int[n], tat = new int[n];
+        boolean[] done = new boolean[n];
+        StringBuilder out = new StringBuilder("SRTF:\n");
+
+        while (complete < n) {
+            int idx = -1, min = Integer.MAX_VALUE;
+            for (int i = 0; i < n; i++) {
+                if (!done[i] && processes.get(i).arrivalTime <= time && remaining[i] < min && remaining[i] > 0) {
+                    min = remaining[i];
+                    idx = i;
                 }
             }
-
-            if (shortest == null) {
+            if (idx == -1) {
                 time++;
                 continue;
             }
-
-            shortest.startTime = time;
-            time += shortest.burstTime;
-            shortest.completionTime = time;
-            done.add(shortest);
-            temp.remove(shortest);
-        }
-
-        print(done, out);
-    }
-
-    // ========== SRTF ===========
-    public static void srtf(List<Process> list, StringBuilder out) {
-        List<Process> temp = new ArrayList<>();
-        for (Process p : list) temp.add(new Process(p.pid, p.arrivalTime, p.burstTime));
-
-        int time = 0, done = 0;
-        while (done < temp.size()) {
-            Process next = null;
-            for (Process p : temp) {
-                if (p.arrivalTime <= time && p.remainingTime > 0) {
-                    if (next == null || p.remainingTime < next.remainingTime) {
-                        next = p;
-                    }
-                }
+            remaining[idx]--;
+            if (remaining[idx] == 0) {
+                complete++;
+                done[idx] = true;
+                int finish = time + 1;
+                wt[idx] = finish - processes.get(idx).burstTime - processes.get(idx).arrivalTime;
+                if (wt[idx] < 0) wt[idx] = 0;
+                tat[idx] = wt[idx] + processes.get(idx).burstTime;
+                out.append(processes.get(idx).pid).append(": WT=").append(wt[idx]).append(", TAT=").append(tat[idx]).append("\n");
             }
-
-            if (next == null) {
-                time++;
-                continue;
-            }
-
-            if (next.startTime == -1) next.startTime = time;
-            next.remainingTime--;
             time++;
-
-            if (next.remainingTime == 0) {
-                next.completionTime = time;
-                done++;
-            }
         }
-
-        print(temp, out);
+        return out.toString();
     }
 
-    // ========== Round Robin ===========
-    public static void rr(List<Process> list, int quantum, StringBuilder out) {
+    public static String roundRobin(List<Process> plist, int quantum) {
         Queue<Process> queue = new LinkedList<>();
-        List<Process> temp = new ArrayList<>();
-        for (Process p : list) temp.add(new Process(p.pid, p.arrivalTime, p.burstTime));
+        List<Process> processes = new ArrayList<>(plist);
+        processes.sort(Comparator.comparingInt(p -> p.arrivalTime));
+        int time = 0;
+        int[] rem = new int[processes.size()];
+        for (int i = 0; i < processes.size(); i++) rem[i] = processes.get(i).burstTime;
+        int[] wt = new int[processes.size()];
+        boolean[] added = new boolean[processes.size()];
+        StringBuilder out = new StringBuilder("RR:\n");
 
-        int time = 0, index = 0;
-        while (true) {
-            while (index < temp.size() && temp.get(index).arrivalTime <= time) {
-                queue.add(temp.get(index));
-                index++;
+        int idx = 0;
+        while (!queue.isEmpty() || idx < processes.size()) {
+            while (idx < processes.size() && processes.get(idx).arrivalTime <= time) {
+                queue.offer(processes.get(idx));
+                added[idx] = true;
+                idx++;
             }
-
             if (queue.isEmpty()) {
-                if (index < temp.size()) {
-                    time = temp.get(index).arrivalTime;
-                    continue;
-                } else break;
+                time++;
+                continue;
             }
-
             Process p = queue.poll();
-            if (p.startTime == -1) p.startTime = time;
-
-            int runTime = Math.min(quantum, p.remainingTime);
-            p.remainingTime -= runTime;
-            time += runTime;
-
-            while (index < temp.size() && temp.get(index).arrivalTime <= time) {
-                queue.add(temp.get(index));
-                index++;
+            int i = processes.indexOf(p);
+            int exec = Math.min(quantum, rem[i]);
+            rem[i] -= exec;
+            time += exec;
+            for (int j = idx; j < processes.size(); j++) {
+                if (!added[j] && processes.get(j).arrivalTime <= time) {
+                    queue.offer(processes.get(j));
+                    added[j] = true;
+                }
             }
-
-            if (p.remainingTime > 0) queue.add(p);
-            else p.completionTime = time;
+            if (rem[i] > 0) {
+                queue.offer(p);
+            } else {
+                wt[i] = time - p.arrivalTime - p.burstTime;
+                out.append(p.pid).append(": WT=").append(wt[i]).append(", TAT=").append(wt[i]).append(p.burstTime).append("\n");
+            }
         }
-
-        print(temp, out);
+        return out.toString();
     }
 
-    // ========== MLFQ ===========
-    public static void mlfq(List<Process> list, int[] timeQuantums, int[] allotments, StringBuilder out) {
-        final int levels = 4;
+    public static String mlfq(List<Process> plist, int quantum) {
         List<Queue<Process>> queues = new ArrayList<>();
-        for (int i = 0; i < levels; i++) queues.add(new LinkedList<>());
+        for (int i = 0; i < 3; i++) queues.add(new LinkedList<>());
+        List<Process> processes = new ArrayList<>(plist);
+        int time = 0;
+        int[] rem = new int[processes.size()];
+        for (int i = 0; i < processes.size(); i++) rem[i] = processes.get(i).burstTime;
+        int[] wt = new int[processes.size()];
+        int[] level = new int[processes.size()];
+        boolean[] added = new boolean[processes.size()];
+        StringBuilder out = new StringBuilder("MLFQ:\n");
 
-        List<Process> all = new ArrayList<>();
-        for (Process p : list) all.add(new Process(p.pid, p.arrivalTime, p.burstTime));
-
-        int time = 0, index = 0;
-        while (true) {
-            while (index < all.size() && all.get(index).arrivalTime <= time) {
-                all.get(index).queueLevel = 0;
-                queues.get(0).add(all.get(index));
-                index++;
+        int idx = 0, completed = 0;
+        while (completed < processes.size()) {
+            for (int i = idx; i < processes.size(); i++) {
+                if (!added[i] && processes.get(i).arrivalTime <= time) {
+                    queues.get(0).offer(processes.get(i));
+                    added[i] = true;
+                    idx++;
+                }
             }
-
-            Process current = null;
-            int level = -1;
-            for (int i = 0; i < levels; i++) {
+            int lvl = -1;
+            for (int i = 0; i < 3; i++) {
                 if (!queues.get(i).isEmpty()) {
-                    current = queues.get(i).poll();
-                    level = i;
+                    lvl = i;
                     break;
                 }
             }
-
-            if (current == null) {
-                if (index >= all.size()) break;
+            if (lvl == -1) {
                 time++;
                 continue;
             }
-
-            if (current.startTime == -1) current.startTime = time;
-            int runtime = Math.min(timeQuantums[level], current.remainingTime);
-            current.remainingTime -= runtime;
-            time += runtime;
-
-            while (index < all.size() && all.get(index).arrivalTime <= time) {
-                all.get(index).queueLevel = 0;
-                queues.get(0).add(all.get(index));
-                index++;
+            Process p = queues.get(lvl).poll();
+            int i = processes.indexOf(p);
+            int exec = Math.min(quantum * (lvl + 1), rem[i]);
+            rem[i] -= exec;
+            time += exec;
+            for (int j = idx; j < processes.size(); j++) {
+                if (!added[j] && processes.get(j).arrivalTime <= time) {
+                    queues.get(0).offer(processes.get(j));
+                    added[j] = true;
+                    idx++;
+                }
             }
-
-            if (current.remainingTime == 0) {
-                current.completionTime = time;
+            if (rem[i] > 0) {
+                level[i] = Math.min(2, level[i] + 1);
+                queues.get(level[i]).offer(p);
             } else {
-                int nextLevel = Math.min(level + 1, levels - 1);
-                current.queueLevel = nextLevel;
-                queues.get(nextLevel).add(current);
+                wt[i] = time - p.arrivalTime - p.burstTime;
+                out.append(p.pid).append(": WT=").append(wt[i]).append(", TAT=").append(wt[i]).append(p.burstTime).append("\n");
+                completed++;
             }
         }
-
-        print(all, out);
+        return out.toString();
     }
 
-    // ========== Print and Export ===========
-    public static void print(List<Process> list, StringBuilder out) {
-        int totalTAT = 0;
-        out.append("PID\tAT\tBT\tCT\tTAT\tRT\n");
-        for (Process p : list) {
-            int tat = p.completionTime - p.arrivalTime;
-            int rt = p.startTime - p.arrivalTime;
-            totalTAT += tat;
-            out.append(p.pid).append("\t").append(p.arrivalTime).append("\t").append(p.burstTime).append("\t").append(p.completionTime).append("\t").append(tat).append("\t").append(rt).append("\n");
-        }
-        out.append("\nAverage Turnaround Time: ").append(String.format("%.2f", (double) totalTAT / list.size()));
-    }
-
-    public static void exportToFile(String content) {
-        try {
-            String timestamp = new SimpleDateFormat("yyyyMMdd_HHmmss").format(new Date());
-            String filename = "cpu_results_" + timestamp + ".txt";
-            try (PrintWriter out = new PrintWriter(new FileWriter(filename))) {
-                out.print(content);
-            }
-        } catch (Exception e) {
+    public static void exportToFile(String data) {
+        try (FileWriter fw = new FileWriter("output.txt")) {
+            fw.write(data);
+            JOptionPane.showMessageDialog(null, "Output exported to output.txt");
+        } catch (IOException e) {
+            JOptionPane.showMessageDialog(null, "Failed to export: " + e.getMessage());
         }
     }
-} 
+}
