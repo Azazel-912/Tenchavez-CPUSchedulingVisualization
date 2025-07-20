@@ -22,13 +22,13 @@ import java.util.List;
 import java.util.Queue;
 import java.util.stream.Collectors;
 import javax.swing.Timer;
-import javax.swing.filechooser.FileNameExtensionFilter; // For file chooser
+import javax.swing.filechooser.FileNameExtensionFilter;
 
 public class SchedulerGUI extends JFrame {
 
     // --- GUI Components ---
     // Left Panels - Process Definition and Input
-    private JTextField pidField, arrivalTimeField, execTimeField, priorityField, extensionField;
+    private JTextField pidField, arrivalTimeField, execTimeField, priorityField;
     private JComboBox<String> processNameDropdown;
     private JTextField randomLengthField;
     private JButton enqueueButton, dequeueButton, updateButton, generateRandomBtn;
@@ -48,6 +48,7 @@ public class SchedulerGUI extends JFrame {
 
     // Left Panels - Gantt Chart
     private JPanel ganttChartPanel;
+    private JScrollPane ganttScrollPane; // Declare ganttScrollPane here to make it accessible
 
     // Right Panels - Live Status Table
     private JTable liveStatusTable;
@@ -73,14 +74,14 @@ public class SchedulerGUI extends JFrame {
     private String nextInQueuePID = "None"; // For Next Queue display
 
     // Gantt Chart specific
-    private List<String> ganttChartSequence = new ArrayList<>(); // Stores PIDs for Gantt chart blocks
+    private List<GanttBlock> ganttChartSequence = new ArrayList<>(); // Now stores GanttBlock objects
     private Map<String, Color> processColors = new HashMap<>(); // To keep consistent colors for processes
 
     // --- Gantt Chart specific constants ---
-    private static final int GANTT_BLOCK_WIDTH = 30; // Width of each time unit block
-    private static final int GANTT_ROW_HEIGHT = 20; // Height for the drawing area of each process
-    private static final int GANTT_TIME_AXIS_HEIGHT = 20; // Height for the time axis
-    private static final int GANTT_PANEL_FIXED_HEIGHT = GANTT_TIME_AXIS_HEIGHT + GANTT_ROW_HEIGHT + 20; // Total fixed height for the Gantt Chart Panel (e.g., 1 row for blocks + axis + padding)
+    private static final int GANTT_BLOCK_WIDTH = 45; // Increased from 30
+    private static final int GANTT_ROW_HEIGHT = 35; // Increased from 20
+    private static final int GANTT_TIME_AXIS_HEIGHT = 25; // Slightly increased for labels
+    private static final int GANTT_PANEL_FIXED_HEIGHT = GANTT_TIME_AXIS_HEIGHT + GANTT_ROW_HEIGHT + 25; // Adjusted total fixed height
 
     // --- Colors ---
     private final Color CREAM = new Color(255, 253, 208);
@@ -88,10 +89,10 @@ public class SchedulerGUI extends JFrame {
     private final Color LIGHT_GRAY_BORDER = new Color(200, 200, 200);
 
     // Algorithm-specific data structures
-    private Queue<Process> Queue;
-    private Process crentCPUProcess = null;
+    private Queue<Process> Queue; // General purpose queue for FCFS, RR, and as a pool for SJF/SRTF
+    private Process currentCPUProcess = null; // Renamed from crentCPUProcess
     // For Round Robin
-    private int currentProcessQuantumRemaining; 
+    private int currentProcessQuantumRemaining;
     private List<Queue<Process>> mlfqQueues; // For MLFQ
     private int[] mlfqQuantums = new int[4]; // Configurable quantums for Q0, Q1, Q2, Q3
     private int[] mlfqAllotments = new int[4]; // Configurable allotment times for Q0, Q1, Q2, Q3
@@ -109,7 +110,9 @@ public class SchedulerGUI extends JFrame {
         addListeners();
         updateProcessDefinitionDropdown(); // Initialize dropdown with any initial processes if applicable
         updateMetricsDisplay(); // Initialize metrics to 0 or default
+        // Set initial message on the correctly initialized label
         actionMessageLabel.setText("Welcome! Define processes and click Simulate.");
+
 
         // Set frame to maximized state
         setExtendedState(JFrame.MAXIMIZED_BOTH);
@@ -124,7 +127,6 @@ public class SchedulerGUI extends JFrame {
         // Process Input Fields
         processNameDropdown = new JComboBox<>();
         pidField = new JTextField(5);
-        extensionField = new JTextField(".script", 4); // Default extension
         arrivalTimeField = new JTextField("0", 3);
         execTimeField = new JTextField("10", 3);
         priorityField = new JTextField("5", 3);
@@ -138,7 +140,7 @@ public class SchedulerGUI extends JFrame {
 
         // Process Definition Table
         processDefinitionModel = new DefaultTableModel(
-            new Object[]{"#", "Process", "Extension", "Arrival Time", "Exec. Time", "Priority"}, 0 // Added Extension column
+                new Object[]{"#", "Process", "Arrival Time", "Exec. Time", "Priority"}, 0 // Removed Extension column
         ) {
             @Override
             public boolean isCellEditable(int row, int column) {
@@ -165,13 +167,16 @@ public class SchedulerGUI extends JFrame {
         q2AllotmentField = new JTextField("12", 3);
         q3AllotmentField = new JTextField("16", 3); // Default allotments
 
-        // Action Message
+        // Action Message Label Initialization (ALL properties set here)
         actionMessageLabel = new JLabel("Status Message Here", SwingConstants.CENTER);
         actionMessageLabel.setOpaque(true);
         actionMessageLabel.setBackground(DARK_BLUE_BACKGROUND);
         actionMessageLabel.setForeground(Color.WHITE);
         actionMessageLabel.setFont(new Font("Monospaced", Font.BOLD, 14));
         actionMessageLabel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
+        actionMessageLabel.setAlignmentX(Component.CENTER_ALIGNMENT); // For BoxLayout centering
+        actionMessageLabel.setMaximumSize(new Dimension(Integer.MAX_VALUE, actionMessageLabel.getPreferredSize().height)); // Allow stretching horizontally
+
 
         // Gantt Chart Panel
         ganttChartPanel = new JPanel() {
@@ -198,7 +203,7 @@ public class SchedulerGUI extends JFrame {
         // --- Right Panel Components (Live Status, Metrics, Controls) ---
         // Live Status Table
         liveStatusModel = new DefaultTableModel(
-            new Object[]{"Process", "Status", "Completion %", "Rem. Time", "Wait Time", "Comp. Time", "TAT", "Resp. Time"}, 0
+                new Object[]{"Process", "Status", "Completion %", "Rem. Time", "Wait Time", "Comp. Time", "TAT", "Resp. Time"}, 0
         ) {
             @Override
             public boolean isCellEditable(int row, int column) {
@@ -248,11 +253,11 @@ public class SchedulerGUI extends JFrame {
         simulationSpeedSlider.setPaintLabels(true);
         // Custom labels for speed (inverted: lower ms = faster)
         Hashtable<Integer, JLabel> labelTable = new Hashtable<>();
-        labelTable.put(10, new JLabel("x100 (Fast)"));
-        labelTable.put(100, new JLabel("x10"));
-        labelTable.put(200, new JLabel("x5"));
-        labelTable.put(500, new JLabel("x2"));
-        labelTable.put(1000, new JLabel("x1 (Slow)"));
+        labelTable.put(50, new JLabel("x100")); 
+        labelTable.put(300, new JLabel("x10"));
+        labelTable.put(500, new JLabel("x5"));
+        labelTable.put(750, new JLabel("x2"));
+        labelTable.put(1000, new JLabel("x1")); 
         simulationSpeedSlider.setLabelTable(labelTable);
 
 
@@ -270,7 +275,7 @@ public class SchedulerGUI extends JFrame {
         leftPanel.setBackground(CREAM);
 
         // Fixed width for the left panel to control overall layout
-        int fixedLeftPanelWidth = 550; // Adjust this value as needed based on your screen/preference
+        int fixedLeftPanelWidth = 700; // Increased width for better label display
         leftPanel.setPreferredSize(new Dimension(fixedLeftPanelWidth, Integer.MAX_VALUE));
         leftPanel.setMinimumSize(new Dimension(fixedLeftPanelWidth, 500)); // Min height
 
@@ -288,16 +293,14 @@ public class SchedulerGUI extends JFrame {
         processInputSection.add(generateRandomPanel, BorderLayout.NORTH);
 
         // Row 2: Individual Process Input Fields
-        JPanel individualProcessInputPanel = new JPanel(new GridLayout(2, 5, 5, 5)); // 2 rows, 5 columns (labels + fields)
+        JPanel individualProcessInputPanel = new JPanel(new GridLayout(2, 4, 5, 5)); // Changed to 4 columns
         individualProcessInputPanel.setBackground(CREAM);
         individualProcessInputPanel.add(new JLabel("Process:"));
-        individualProcessInputPanel.add(new JLabel("Extension:"));
         individualProcessInputPanel.add(new JLabel("Arrival Time:"));
         individualProcessInputPanel.add(new JLabel("Exec. Time:"));
         individualProcessInputPanel.add(new JLabel("Priority:"));
 
         individualProcessInputPanel.add(pidField);
-        individualProcessInputPanel.add(extensionField);
         individualProcessInputPanel.add(arrivalTimeField);
         individualProcessInputPanel.add(execTimeField);
         individualProcessInputPanel.add(priorityField);
@@ -321,20 +324,24 @@ public class SchedulerGUI extends JFrame {
         processTablePanel.add(new JScrollPane(processDefinitionTable), BorderLayout.CENTER);
         leftPanel.add(processTablePanel, BorderLayout.CENTER);
 
-        // Bottom-Left: Algorithm, Action Message, MLFQ Config, Gantt Chart
-        JPanel bottomSectionLeft = new JPanel(new BorderLayout(5, 5));
-        bottomSectionLeft.setBackground(CREAM);
+        // --- Bottom-Left: Algorithm, Action Message, MLFQ Config, Gantt Chart ---
+        // Create a new panel to hold algorithm, MLFQ config, action message, and Gantt
+        JPanel bottomAreaContainer = new JPanel();
+        bottomAreaContainer.setLayout(new BoxLayout(bottomAreaContainer, BoxLayout.Y_AXIS));
+        bottomAreaContainer.setBackground(CREAM);
+        bottomAreaContainer.setBorder(BorderFactory.createEmptyBorder(5, 5, 5, 5)); // Add some padding
 
+        // Add Algorithm Panel
         JPanel algorithmPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 5));
         algorithmPanel.setBackground(CREAM);
         algorithmPanel.add(new JLabel("Algorithm:"));
         algorithmPanel.add(algorithmComboBox);
         algorithmPanel.add(new JLabel("Time Quantum for RR:"));
         algorithmPanel.add(timeQuantumField);
-        bottomSectionLeft.add(algorithmPanel, BorderLayout.NORTH);
+        bottomAreaContainer.add(algorithmPanel);
 
-        // MLFQ Configuration Panel (New)
-        JPanel mlfqConfigPanel = new JPanel(new GridBagLayout());
+        // Add MLFQ Configuration Panel
+        JPanel mlfqConfigPanel = new JPanel(new GridBagLayout()); // Keep current MLFQ config layout
         mlfqConfigPanel.setBackground(CREAM);
         mlfqConfigPanel.setBorder(BorderFactory.createTitledBorder("MLFQ Quantums & Allotments"));
         GridBagConstraints gbc = new GridBagConstraints();
@@ -364,31 +371,25 @@ public class SchedulerGUI extends JFrame {
         gbc.gridx = 0; gbc.gridy = 4; mlfqConfigPanel.add(new JLabel("Q3:"), gbc);
         gbc.gridx = 1; gbc.gridy = 4; mlfqConfigPanel.add(q3QuantumField, gbc);
         gbc.gridx = 2; gbc.gridy = 4; mlfqConfigPanel.add(q3AllotmentField, gbc);
+        bottomAreaContainer.add(mlfqConfigPanel); // Add MLFQ config panel to the new container
 
-        bottomSectionLeft.add(mlfqConfigPanel, BorderLayout.CENTER); // MLFQ Config
+        // Add Action Message Label
+        bottomAreaContainer.add(actionMessageLabel);
 
-        JPanel actionAndGanttPanel = new JPanel(new BorderLayout(5,5));
-        actionAndGanttPanel.setBackground(CREAM);
-        actionAndGanttPanel.add(actionMessageLabel, BorderLayout.NORTH); // Action Message
-
+        // Add Gantt Chart
         JPanel ganttChartWrapper = new JPanel(new BorderLayout());
         ganttChartWrapper.setBackground(CREAM);
         ganttChartWrapper.setBorder(BorderFactory.createTitledBorder("Gantt Chart (Each box represents a second)"));
 
-        JScrollPane ganttScrollPane = new JScrollPane(ganttChartPanel);
+        ganttScrollPane = new JScrollPane(ganttChartPanel); // Initialize ganttScrollPane here
         ganttScrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED);
         ganttScrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_NEVER);
-        // Explicitly set preferred viewport size for the JScrollPane
         ganttScrollPane.setPreferredSize(new Dimension(fixedLeftPanelWidth - 20, GANTT_PANEL_FIXED_HEIGHT + 5));
         ganttScrollPane.setMinimumSize(new Dimension(fixedLeftPanelWidth - 20, GANTT_PANEL_FIXED_HEIGHT + 5));
-
         ganttChartWrapper.add(ganttScrollPane, BorderLayout.CENTER);
+        bottomAreaContainer.add(ganttChartWrapper); // Add Gantt chart wrapper to the new container
 
-        actionAndGanttPanel.add(ganttChartWrapper, BorderLayout.CENTER);
-
-        bottomSectionLeft.add(actionAndGanttPanel, BorderLayout.SOUTH);
-
-        leftPanel.add(bottomSectionLeft, BorderLayout.SOUTH);
+        leftPanel.add(bottomAreaContainer, BorderLayout.SOUTH); // Add the new container to the left panel's SOUTH
         add(leftPanel, BorderLayout.WEST); // Add the whole left panel to the main frame
 
 
@@ -417,11 +418,11 @@ public class SchedulerGUI extends JFrame {
         metricsPanel.add(avgWaitingTimeLabel);
         metricsPanel.add(avgExecutionTimeLabel);
         metricsPanel.add(avgTurnaroundTimeLabel); // New
-        metricsPanel.add(avgResponseTimeLabel);   // New
+        metricsPanel.add(avgResponseTimeLabel);    // New
         metricsPanel.add(totalExecutionTimeLabel);
         metricsPanel.add(currentCPULabel);
         metricsPanel.add(nextQueueLabel);
-        metricsPanel.add(overallProgressBar);
+        metricsPanel.add(overallProgressBar); // CORRECTED LINE: overallProgressBar should be added to metricsPanel
         rightPanel.add(metricsPanel, BorderLayout.CENTER);
 
         // Bottom-Right: Simulation Controls
@@ -456,9 +457,8 @@ public class SchedulerGUI extends JFrame {
         // Simulation Speed Slider Listener
         simulationSpeedSlider.addChangeListener(e -> {
             simulationSpeed = simulationSpeedSlider.getValue();
-            if (simulationTimer.isRunning()) {
-                simulationTimer.setDelay(simulationSpeed);
-            }
+            // ALWAYS update the timer's delay when the slider changes
+            simulationTimer.setDelay(simulationSpeed);
         });
 
         // Algorithm ComboBox Listener (for enabling/disabling quantum/MLFQ fields)
@@ -491,7 +491,6 @@ public class SchedulerGUI extends JFrame {
     private void addProcessFromInput() {
         try {
             String pid = pidField.getText().trim();
-            String ext = extensionField.getText().trim();
             int at = Integer.parseInt(arrivalTimeField.getText().trim());
             int bt = Integer.parseInt(execTimeField.getText().trim());
             int prio = Integer.parseInt(priorityField.getText().trim());
@@ -501,31 +500,30 @@ public class SchedulerGUI extends JFrame {
                 return;
             }
             if (bt <= 0) {
-                 JOptionPane.showMessageDialog(this, "Burst Time must be greater than 0.");
-                 return;
-            }
-
-            // Check for duplicate PID (regardless of extension for simplicity, or modify logic)
-            if (definedProcesses.stream().anyMatch(p -> p.pid.equals(pid) && p.extension.equals(ext))) {
-                JOptionPane.showMessageDialog(this, "Process with PID '" + pid + ext + "' already exists. Use Update to modify.");
+                JOptionPane.showMessageDialog(this, "Burst Time must be greater than 0.");
                 return;
             }
 
-            Process newProcess = new Process(pid, ext, at, bt, prio);
+            // Check for duplicate PID
+            if (definedProcesses.stream().anyMatch(p -> p.pid.equals(pid))) {
+                JOptionPane.showMessageDialog(this, "Process with PID '" + pid + "' already exists. Use Update to modify.");
+                return;
+            }
+
+            Process newProcess = new Process(pid, at, bt, prio);
             definedProcesses.add(newProcess);
             updateProcessDefinitionTable();
             updateProcessDefinitionDropdown();
-            actionMessageLabel.setText("Process " + newProcess.getFullPid() + " enqueued.");
+            actionMessageLabel.setText("Process " + newProcess.pid + " enqueued.");
 
             // Clear input fields after adding
             pidField.setText("");
-            extensionField.setText(".script");
             arrivalTimeField.setText("0");
             execTimeField.setText("10");
             priorityField.setText("5");
 
             // Assign a color for the new process for Gantt chart
-            getColorForProcess(newProcess.getFullPid());
+            getColorForProcess(newProcess.pid);
 
         } catch (NumberFormatException ex) {
             JOptionPane.showMessageDialog(this, "Invalid number format for Arrival Time, Exec. Time, or Priority.");
@@ -535,11 +533,11 @@ public class SchedulerGUI extends JFrame {
     private void deleteSelectedProcess() {
         int selectedRow = processDefinitionTable.getSelectedRow();
         if (selectedRow != -1) {
-            String fullPidToDelete = (String) processDefinitionModel.getValueAt(selectedRow, 1) + (String) processDefinitionModel.getValueAt(selectedRow, 2);
-            definedProcesses.removeIf(p -> p.getFullPid().equals(fullPidToDelete));
+            String pidToDelete = (String) processDefinitionModel.getValueAt(selectedRow, 1);
+            definedProcesses.removeIf(p -> p.pid.equals(pidToDelete));
             updateProcessDefinitionTable();
             updateProcessDefinitionDropdown();
-            actionMessageLabel.setText("Process " + fullPidToDelete + " dequeued.");
+            actionMessageLabel.setText("Process " + pidToDelete + " dequeued.");
         } else {
             JOptionPane.showMessageDialog(this, "Please select a process to delete.");
         }
@@ -550,38 +548,33 @@ public class SchedulerGUI extends JFrame {
         if (selectedRow != -1) {
             try {
                 String oldPidName = (String) processDefinitionModel.getValueAt(selectedRow, 1);
-                String oldExt = (String) processDefinitionModel.getValueAt(selectedRow, 2);
-                String oldFullPid = oldPidName + oldExt;
 
                 String newPidName = (String) processDefinitionModel.getValueAt(selectedRow, 1);
-                String newExt = (String) processDefinitionModel.getValueAt(selectedRow, 2);
-                int newAt = Integer.parseInt(processDefinitionModel.getValueAt(selectedRow, 3).toString());
-                int newBt = Integer.parseInt(processDefinitionModel.getValueAt(selectedRow, 4).toString());
-                int newPrio = Integer.parseInt(processDefinitionModel.getValueAt(selectedRow, 5).toString());
+                int newAt = Integer.parseInt(processDefinitionModel.getValueAt(selectedRow, 2).toString());
+                int newBt = Integer.parseInt(processDefinitionModel.getValueAt(selectedRow, 3).toString());
+                int newPrio = Integer.parseInt(processDefinitionModel.getValueAt(selectedRow, 4).toString());
 
                 if (newBt <= 0) {
                     JOptionPane.showMessageDialog(this, "Burst Time must be greater than 0.");
-                    updateProcessDefinitionTable(); // Revert display to old values
+                    updateProcessDefinitionTable();
                     return;
                 }
 
-                String newFullPid = newPidName + newExt;
-                // Check for duplicate PID if PID/Ext changed to an existing one
-                if (!oldFullPid.equals(newFullPid) && definedProcesses.stream().anyMatch(p -> p.getFullPid().equals(newFullPid))) {
-                    JOptionPane.showMessageDialog(this, "A process with PID '" + newFullPid + "' already exists. Cannot update to a duplicate PID.");
+                // Check for duplicate PID if PID changed to an existing one
+                if (!oldPidName.equals(newPidName) && definedProcesses.stream().anyMatch(p -> p.pid.equals(newPidName))) {
+                    JOptionPane.showMessageDialog(this, "A process with PID '" + newPidName + "' already exists. Cannot update to a duplicate PID.");
                     updateProcessDefinitionTable();
                     return;
                 }
 
                 for (Process p : definedProcesses) {
-                    if (p.getFullPid().equals(oldFullPid)) {
+                    if (p.pid.equals(oldPidName)) {
                         p.pid = newPidName;
-                        p.extension = newExt;
                         p.arrivalTime = newAt;
                         p.burstTime = newBt;
                         p.priority = newPrio;
                         p.reset(); // Reset simulation-related times on update
-                        actionMessageLabel.setText("Process " + p.getFullPid() + " updated.");
+                        actionMessageLabel.setText("Process " + p.pid + " updated.");
                         updateProcessDefinitionTable();
                         updateProcessDefinitionDropdown();
                         return;
@@ -589,7 +582,7 @@ public class SchedulerGUI extends JFrame {
                 }
             } catch (NumberFormatException ex) {
                 JOptionPane.showMessageDialog(this, "Invalid input in table. Please check numerical values.");
-                updateProcessDefinitionTable(); // Revert display to old values
+                updateProcessDefinitionTable();
             } catch (HeadlessException ex) {
                 JOptionPane.showMessageDialog(this, "Error updating process: " + ex.getMessage());
             }
@@ -605,14 +598,13 @@ public class SchedulerGUI extends JFrame {
             Random rand = new Random();
             for (int i = 0; i < numProcesses; i++) {
                 String generatedPid;
-                String ext = ".script";
                 int counter = definedProcesses.size() + 1;
 
                 do {
                     generatedPid = "P" + counter;
                     final String currentPidForLambda = generatedPid;
                     counter++;
-                    if (definedProcesses.stream().anyMatch(p -> p.pid.equals(currentPidForLambda) && p.extension.equals(ext))) {
+                    if (definedProcesses.stream().anyMatch(p -> p.pid.equals(currentPidForLambda))) {
                     } else {
                         break;
                     }
@@ -622,8 +614,8 @@ public class SchedulerGUI extends JFrame {
                 int bt = rand.nextInt(20) + 1; // Burst time 1-20 (must be > 0)
                 int prio = rand.nextInt(10) + 1; // Priority 1-10
 
-                definedProcesses.add(new Process(generatedPid, ext, at, bt, prio));
-                getColorForProcess(generatedPid + ext);
+                definedProcesses.add(new Process(generatedPid, at, bt, prio));
+                getColorForProcess(generatedPid);
             }
             updateProcessDefinitionTable();
             updateProcessDefinitionDropdown();
@@ -639,12 +631,11 @@ public class SchedulerGUI extends JFrame {
         int rowNum = 1;
         for (Process p : definedProcesses) {
             processDefinitionModel.addRow(new Object[]{
-                rowNum++,
-                p.pid,
-                p.extension,
-                p.arrivalTime,
-                p.burstTime,
-                p.priority
+                    rowNum++,
+                    p.pid,
+                    p.arrivalTime,
+                    p.burstTime,
+                    p.priority
             });
         }
     }
@@ -652,7 +643,7 @@ public class SchedulerGUI extends JFrame {
     private void updateProcessDefinitionDropdown() {
         processNameDropdown.removeAllItems();
         for (Process p : definedProcesses) {
-            processNameDropdown.addItem(p.getFullPid());
+            processNameDropdown.addItem(p.pid);
         }
     }
 
@@ -660,162 +651,170 @@ public class SchedulerGUI extends JFrame {
         liveStatusModel.setRowCount(0); // Clear existing rows
         if (currentSimulationProcesses == null) return;
 
-        currentSimulationProcesses.sort(Comparator.comparingInt(p -> p.arrivalTime));
+        // Sort by PID for consistent display
+        currentSimulationProcesses.sort(Comparator.comparing(p -> p.pid));
 
         for (Process p : currentSimulationProcesses) {
-            double completionPercent = (p.burstTime > 0) ? (double)(p.burstTime - p.remainingTime) / p.burstTime * 100 : 0.0;
-            if (p.remainingTime == 0 && p.completionTime != -1) completionPercent = 100.0;
-
-            String statusText;
-            if (p.isCompleted()) {
-                statusText = "Completed";
-            } else if (p.startTime != -1 && p.remainingTime > 0 && p.pid.equals(currentRunningProcessPID)) {
-                statusText = "Running";
-            } else if (p.arrivalTime <= currentTime && p.remainingTime > 0) {
-                statusText = "Ready";
+            String status;
+            if (p.hasCompleted) {
+                status = "Completed";
+            } else if (p.getRemainingBurstTime() < p.burstTime) { // Started but not finished
+                status = "Running"; // Or "Waiting" if not currentCPUProcess
             } else {
-                statusText = "New";
+                status = "Ready"; // Not yet started
             }
 
-            // Display "N/A" or "-" for completed metrics if not yet completed
-            String completionTime = p.isCompleted() ? String.valueOf(p.completionTime) : "-";
-            String turnaroundTime = p.isCompleted() ? String.valueOf(p.turnaroundTime) : "-";
-            String responseTime = p.startTime != -1 ? String.valueOf(p.responseTime) : "-"; // Response time is known once started
+            // Refine "Running" vs "Waiting" for current simulation tick
+            if (currentCPUProcess != null && currentCPUProcess.pid.equals(p.pid) && !p.hasCompleted) {
+                status = "Running";
+            } else if (!p.hasCompleted && p.getRemainingBurstTime() < p.burstTime) { // Has run before, but not running now
+                status = "Waiting";
+            } else if (p.arrivalTime > currentTime) {
+                status = "Scheduled"; // Not yet arrived
+            } else if (!p.hasCompleted) {
+                status = "Ready"; // Arrived, not yet run, not currently running
+            }
+
+
+            double completionPercentage = (double) (p.burstTime - p.getRemainingBurstTime()) / p.burstTime * 100;
+            if (p.hasCompleted) completionPercentage = 100.0;
 
             liveStatusModel.addRow(new Object[]{
-                p.getFullPid(),
-                statusText,
-                completionPercent,
-                p.remainingTime,
-                p.waitingTime,
-                completionTime,
-                turnaroundTime,
-                responseTime
+                    p.pid,
+                    status,
+                    completionPercentage, // This column will use ProgressBarRenderer
+                    p.getRemainingBurstTime(),
+                    p.waitingTime,
+                    p.completionTime > 0 ? p.completionTime : "-", // Display actual completion time or "-"
+                    p.turnaroundTime > 0 ? p.turnaroundTime : "-", // Display actual turnaround time or "-"
+                    p.responseTime > 0 ? p.responseTime : "-" // Display actual response time or "-"
             });
         }
     }
 
-    // Custom Cell Renderer for JProgressBar in JTable
-    class ProgressBarRenderer extends DefaultTableCellRenderer {
-        private final JProgressBar progressBar = new JProgressBar(0, 100);
-
-        public ProgressBarRenderer() {
-            setOpaque(true);
-            progressBar.setStringPainted(true);
-            progressBar.setForeground(new Color(50, 205, 50)); // Lime Green
-            progressBar.setBackground(new Color(230, 230, 230)); // Light grey background
-        }
-
-        @Override
-        public Component getTableCellRendererComponent(JTable table, Object value,
-                                                       boolean isSelected, boolean hasFocus,
-                                                       int row, int column) {
-            if (isSelected) {
-                setBackground(table.getSelectionBackground());
-                setForeground(table.getSelectionForeground());
-            } else {
-                setBackground(table.getBackground());
-                setForeground(table.getForeground());
-            }
-
-            if (value instanceof Double percent) {
-                int intPercent = (int) Math.round(percent);
-                if (intPercent < 0) intPercent = 0;
-                if (intPercent > 100) intPercent = 100;
-
-                progressBar.setValue(intPercent);
-                progressBar.setString(String.format("%.2f%%", percent));
-                return progressBar;
-            } else {
-                super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column);
-                return this;
-            }
-        }
-    }
-
-    // --- Simulation Logic ---
-    private Queue<Process> readyQueue;
-    private Process currentCPUProcess = null;
-    // currentProcessQuantumRemaining is already there
-    // mlfqQuantums and mlfqAllotments arrays are now class fields
-
-    private void toggleSimulation() {
-        if (definedProcesses.isEmpty()) {
-            JOptionPane.showMessageDialog(this, "No processes defined. Please add processes first.");
+    private void updateMetricsDisplay() {
+        if (currentSimulationProcesses == null || currentSimulationProcesses.isEmpty()) {
+            avgWaitingTimeLabel.setText("Average Waiting Time : 0.00");
+            avgExecutionTimeLabel.setText("Average Burst Time : 0.00");
+            avgTurnaroundTimeLabel.setText("Average Turnaround Time : 0.00");
+            avgResponseTimeLabel.setText("Average Response Time : 0.00");
+            totalExecutionTimeLabel.setText("Total Simulation Time : 0");
+            currentCPULabel.setText("CPU : None");
+            nextQueueLabel.setText("Next Queue : None");
+            overallProgressBar.setValue(0);
+            overallProgressBar.setString("0.00%");
             return;
         }
 
+        List<Process> completedProcesses = currentSimulationProcesses.stream()
+                .filter(p -> p.hasCompleted)
+                .collect(Collectors.toList());
+
+        double totalWaitingTime = completedProcesses.stream().mapToInt(p -> p.waitingTime).sum();
+        double totalTurnaroundTime = completedProcesses.stream().mapToInt(p -> p.turnaroundTime).sum();
+        double totalResponseTime = completedProcesses.stream().mapToInt(p -> p.responseTime).sum();
+        double totalBurstTime = currentSimulationProcesses.stream().mapToInt(p -> p.burstTime).sum();
+
+
+        avgWaitingTimeLabel.setText(String.format("Average Waiting Time : %.2f", completedProcesses.isEmpty() ? 0.0 : totalWaitingTime / completedProcesses.size()));
+        avgTurnaroundTimeLabel.setText(String.format("Average Turnaround Time : %.2f", completedProcesses.isEmpty() ? 0.0 : totalTurnaroundTime / completedProcesses.size()));
+        avgResponseTimeLabel.setText(String.format("Average Response Time : %.2f", completedProcesses.isEmpty() ? 0.0 : totalResponseTime / completedProcesses.size()));
+        avgExecutionTimeLabel.setText(String.format("Average Burst Time : %.2f", currentSimulationProcesses.isEmpty() ? 0.0 : totalBurstTime / currentSimulationProcesses.size()));
+        totalExecutionTimeLabel.setText("Total Simulation Time : " + currentTime);
+
+        currentCPULabel.setText("CPU : " + currentRunningProcessPID);
+        nextQueueLabel.setText("Next Queue : " + nextInQueuePID);
+
+        int totalOriginalBurstTime = definedProcesses.stream().mapToInt(p -> p.burstTime).sum();
+        int totalRemainingBurstTime = currentSimulationProcesses.stream().mapToInt(p -> p.getRemainingBurstTime()).sum();
+        int totalExecutedTime = totalOriginalBurstTime - totalRemainingBurstTime;
+
+        if (totalOriginalBurstTime > 0) {
+            int progress = (int) ((double) totalExecutedTime / totalOriginalBurstTime * 100);
+            overallProgressBar.setValue(progress);
+            overallProgressBar.setString(String.format("%.2f%%", (double) totalExecutedTime / totalOriginalBurstTime * 100));
+        } else {
+            overallProgressBar.setValue(0);
+            overallProgressBar.setString("0.00%");
+        }
+    }
+
+
+    private void toggleSimulation() {
         if (simulationTimer.isRunning()) {
             simulationTimer.stop();
-            simulateButton.setText("Simulate");
-            actionMessageLabel.setText("Simulation Paused at time " + currentTime);
+            simulateButton.setText("Resume");
+            actionMessageLabel.setText("Simulation Paused at Time " + currentTime);
         } else {
-            if (currentTime == 0 || currentSimulationProcesses == null || currentSimulationProcesses.isEmpty() || allProcessesCompleted()) {
-                startNewSimulation(); // Start new if first run, or all completed
+            if (currentSimulationProcesses == null || currentSimulationProcesses.isEmpty()) {
+                startNewSimulation();
             }
-            simulationTimer.setDelay(simulationSpeed);
             simulationTimer.start();
-            actionMessageLabel.setText("Simulation Running...");
             simulateButton.setText("Pause");
+            actionMessageLabel.setText("Simulation Running...");
         }
     }
 
     private void startNewSimulation() {
+        if (definedProcesses.isEmpty()) {
+            JOptionPane.showMessageDialog(this, "Please define processes before starting the simulation.");
+            return;
+        }
+
+        // Deep copy defined processes to simulation processes
+        currentSimulationProcesses = definedProcesses.stream()
+                .map(Process::new) // Uses the copy constructor
+                .collect(Collectors.toList());
+
+        // Sort by arrival time initially
+        currentSimulationProcesses.sort(Comparator.comparingInt(p -> p.arrivalTime));
+
         currentTime = 0;
+        ganttChartSequence.clear();
+        processColors.clear(); // Clear colors to re-assign if processes changed
         currentRunningProcessPID = "None";
         nextInQueuePID = "None";
-        ganttChartSequence.clear();
-        currentCPUProcess = null;
+        currentCPUProcess = null; // Initialize currentCPUProcess to null at start of new simulation
+        currentProcessQuantumRemaining = 0;
 
-        // Reset all defined processes to their initial state for a fresh run
-        // Create deep copies of defined processes for simulation
-        currentSimulationProcesses = new ArrayList<>();
-        for (Process p : definedProcesses) {
-            p.reset(); // Reset original process first
-            currentSimulationProcesses.add(new Process(p)); // Then copy its reset state
-        }
-
-        // Initialize algorithm-specific data structures
-        String algo = (String) algorithmComboBox.getSelectedItem();
-        switch (algo) {
-            case "First Come First Serve", "SJF", "SRTF", "Round Robin" -> readyQueue = new LinkedList<>();
+        // Initialize algorithm-specific queues
+        String selectedAlgo = (String) algorithmComboBox.getSelectedItem();
+        switch (selectedAlgo) {
+            case "First Come First Serve", "Round Robin" -> Queue = new LinkedList<>();
+            case "SJF", "SRTF" -> Queue = new PriorityQueue<>(Comparator.comparingInt(Process::getRemainingBurstTime));
             case "MLFQ" -> {
                 mlfqQueues = new ArrayList<>();
-                for (int i = 0; i < 4; i++) { // Always 4 levels for MLFQ
+                for (int i = 0; i < 4; i++) {
                     mlfqQueues.add(new LinkedList<>());
                 }
-                // Read MLFQ quantums and allotments from UI fields
+                // Read MLFQ quantums and allotments
                 try {
-                    mlfqQuantums[0] = Integer.parseInt(q0QuantumField.getText());
-                    mlfqQuantums[1] = Integer.parseInt(q1QuantumField.getText());
-                    mlfqQuantums[2] = Integer.parseInt(q2QuantumField.getText());
-                    mlfqQuantums[3] = Integer.parseInt(q3QuantumField.getText());
+                    mlfqQuantums[0] = Integer.parseInt(q0QuantumField.getText().trim());
+                    mlfqQuantums[1] = Integer.parseInt(q1QuantumField.getText().trim());
+                    mlfqQuantums[2] = Integer.parseInt(q2QuantumField.getText().trim());
+                    mlfqQuantums[3] = Integer.parseInt(q3QuantumField.getText().trim());
 
-                    mlfqAllotments[0] = Integer.parseInt(q0AllotmentField.getText());
-                    mlfqAllotments[1] = Integer.parseInt(q1AllotmentField.getText());
-                    mlfqAllotments[2] = Integer.parseInt(q2AllotmentField.getText());
-                    mlfqAllotments[3] = Integer.parseInt(q3AllotmentField.getText());
+                    mlfqAllotments[0] = Integer.parseInt(q0AllotmentField.getText().trim());
+                    mlfqAllotments[1] = Integer.parseInt(q1AllotmentField.getText().trim());
+                    mlfqAllotments[2] = Integer.parseInt(q2AllotmentField.getText().trim());
+                    mlfqAllotments[3] = Integer.parseInt(q3AllotmentField.getText().trim());
 
-                    // Basic validation
-                    for (int i = 0; i < 4; i++) {
-                        if (mlfqQuantums[i] <= 0 || mlfqAllotments[i] <= 0) {
-                            throw new IllegalArgumentException("MLFQ quantums and allotments must be positive.");
-                        }
-                    }
-                } catch (IllegalArgumentException e) { // Corrected: Just catch IllegalArgumentException
-                    JOptionPane.showMessageDialog(this, "Invalid MLFQ quantum/allotment. Please enter positive integers. Using default values.");
-                    // Reset to hardcoded defaults if error
-                    mlfqQuantums = new int[]{2, 4, 8, 16};
-                    mlfqAllotments = new int[]{4, 8, 12, 16};
-                    // Update UI to reflect defaults
-                    q0QuantumField.setText("2"); q1QuantumField.setText("4"); q2QuantumField.setText("8"); q3QuantumField.setText("16");
-                    q0AllotmentField.setText("4"); q1AllotmentField.setText("8"); q2AllotmentField.setText("12"); q3AllotmentField.setText("16");
+                    for (int q : mlfqQuantums) if (q <= 0) throw new IllegalArgumentException("MLFQ quantums must be > 0");
+                    for (int a : mlfqAllotments) if (a < 0) throw new IllegalArgumentException("MLFQ allotments must be >= 0");
+
+                } catch (NumberFormatException e) {
+                    JOptionPane.showMessageDialog(this, "Invalid number for MLFQ quantum/allotment.", "Configuration Error", JOptionPane.ERROR_MESSAGE);
+                    resetSimulation();
+                    return;
+                } catch (IllegalArgumentException e) {
+                    JOptionPane.showMessageDialog(this, "MLFQ configuration error: " + e.getMessage(), "Configuration Error", JOptionPane.ERROR_MESSAGE);
+                    resetSimulation();
+                    return;
                 }
-            }
-            default -> {
             }
         }
 
+        actionMessageLabel.setText("Simulation started for " + selectedAlgo + ".");
         updateLiveStatusTable();
         updateMetricsDisplay();
         ganttChartPanel.revalidate();
@@ -824,294 +823,317 @@ public class SchedulerGUI extends JFrame {
 
 
     private void simulationTick(ActionEvent e) {
-        String selectedAlgorithm = (String) algorithmComboBox.getSelectedItem();
+        // --- Initial checks and simulation termination ---
+        if (currentSimulationProcesses == null || currentSimulationProcesses.isEmpty()) {
+            simulationTimer.stop();
+            simulateButton.setText("Simulate");
+            actionMessageLabel.setText("Simulation Finished at Time " + currentTime);
+            updateLiveStatusTable(); // Final update
+            updateMetricsDisplay(); // Final update
+            ganttChartPanel.revalidate();
+            ganttChartPanel.repaint();
+            return; // Exit the method as simulation is over
+        }
 
-        // 0. Update waiting times for processes that are ready but not running
-        for (Process p : currentSimulationProcesses) {
-            // Only increment if arrived, not completed, and not currently running
-            if (p.arrivalTime <= currentTime && p.remainingTime > 0 && !p.getFullPid().equals(currentRunningProcessPID)) {
-                p.waitingTime++;
+        // 1. Handle processes arriving at the current time
+        List<Process> arrivedProcesses = currentSimulationProcesses.stream()
+                .filter(p -> p.arrivalTime == currentTime && !p.hasArrived)
+                .collect(Collectors.toList());
+
+        for (Process p : arrivedProcesses) {
+            p.hasArrived = true;
+            String selectedAlgo = (String) algorithmComboBox.getSelectedItem();
+            if (null == selectedAlgo) {
+                Queue.offer(p); // For FCFS and RR, add to regular queue
+            } else switch (selectedAlgo) {
+                case "MLFQ" -> mlfqQueues.get(0).offer(p); // Arrive at Q0 for MLFQ
+                case "SRTF", "SJF" -> // For SJF/SRTF, they enter the priority queue
+                    Queue.offer(p);
+                default -> Queue.offer(p); // For FCFS and RR, add to regular queue
             }
         }
 
-        // 1. Add arrived processes to ready queue(s)
-        // Processes arriving at 'currentTime' (i.e., at the start of this second) become available.
-        // We look for processes whose arrivalTime matches the current second.
-        for (Process p : currentSimulationProcesses) {
-            if (p.arrivalTime == currentTime && !p.hasArrived && p.remainingTime > 0) {
-                p.hasArrived = true;
-                switch (selectedAlgorithm) {
-                    case "First Come First Serve", "Round Robin" -> readyQueue.add(p);
-                    case "SJF", "SRTF" -> // For SJF/SRTF, processes are effectively "ready" once they arrive.
-                        // We add them to the queue for consideration, but the selection logic will pick shortest.
-                        readyQueue.add(p); // Add to the general pool of available processes
-                    case "MLFQ" -> {
-                        mlfqQueues.get(0).add(p); // All processes enter Q0
-                        p.currentQuantum = mlfqQuantums[0]; // Set initial quantum for Q0
-                    }
-                }
-            }
+        // 2. Select the next process to run based on the chosen algorithm
+        String selectedAlgo = (String) algorithmComboBox.getSelectedItem();
+        Process previouslyRunningProcess = currentCPUProcess;
+        Process processToRunThisTick = null;
+
+        switch (selectedAlgo) {
+            case "First Come First Serve" -> processToRunThisTick = FCFS(previouslyRunningProcess);
+            case "SJF" -> processToRunThisTick = SJF(previouslyRunningProcess);
+            case "SRTF" -> processToRunThisTick = SRTF(previouslyRunningProcess);
+            case "Round Robin" -> processToRunThisTick = RoundRobin(previouslyRunningProcess);
+            case "MLFQ" -> processToRunThisTick = MLFQ(previouslyRunningProcess);
         }
 
-        // 2. Select next process to run (preemption logic or next in queue)
-        Process processToRun = null;
+        currentCPUProcess = processToRunThisTick; // Update the main CPU reference
+        currentRunningProcessPID = (currentCPUProcess != null) ? currentCPUProcess.pid : "None";
 
-        if (currentCPUProcess != null && currentCPUProcess.remainingTime > 0) {
-            // If there's a process currently running, consider if it continues or is preempted
-            switch (selectedAlgorithm) {
-                case "First Come First Serve", "SJF" -> // SJF is non-preemptive once started
-                    processToRun = currentCPUProcess; // Continue current process
-                case "SRTF" -> {
-                    // Look for shortest remaining time among *all available* processes (current and newly arrived/ready)
-                    Process shortestOverall = currentSimulationProcesses.stream()
-                            .filter(p -> p.remainingTime > 0 && p.arrivalTime <= currentTime) // Only consider arrived and not completed
-                            .min(Comparator.comparingInt(p -> p.remainingTime))
-                            .orElse(null);
-                    
-                    if (shortestOverall != null && shortestOverall != currentCPUProcess) {
-                        // Preemption occurs: if currentCPUProcess is not the shortest overall
-                        if (currentCPUProcess.remainingTime > 0) {
-                            readyQueue.remove(currentCPUProcess); // Remove from queue if it was put there earlier
-                            readyQueue.add(currentCPUProcess); // Put current back to ready queue
-                        }
-                        processToRun = shortestOverall;
-                        readyQueue.remove(shortestOverall); // Ensure it's removed from ready queue if it was there
-                        actionMessageLabel.setText("SRTF: Preempted " + currentCPUProcess.getFullPid() + " for " + processToRun.getFullPid() + " at time " + currentTime);
-                    } else {
-                        processToRun = currentCPUProcess; // Continue if no preemption
-                    }
-                }
-                case "Round Robin" -> {
-                    currentProcessQuantumRemaining--;
-                    if (currentProcessQuantumRemaining > 0) {
-                        processToRun = currentCPUProcess; // Continue if quantum not expired
-                    } else {
-                        // Quantum expired, preempt current process and move to end of queue
-                        readyQueue.add(currentCPUProcess);
-                        currentCPUProcess = null; // Mark as null to force selection from queue
-                        actionMessageLabel.setText("RR: Quantum expired for " + currentCPUProcess.getFullPid() + " at time " + currentTime);
-                    }
-                }
-                case "MLFQ" -> {
-                    currentCPUProcess.currentQuantum--;
-                    currentCPUProcess.allotmentUsed++;
+        // Determine next in queue for display (based on current state after selection)
+        updateNextInQueueDisplay(selectedAlgo);
 
-                    if (currentCPUProcess.currentQuantum <= 0 || currentCPUProcess.allotmentUsed >= mlfqAllotments[currentCPUProcess.currentQueueLevel]) {
-                        // Quantum for current level expired OR total allotment for this level reached
-                        if (currentCPUProcess.currentQueueLevel < mlfqQueues.size() - 1) {
-                            // Demote to next queue
-                            currentCPUProcess.currentQueueLevel++;
-                            // Reset quantum and allotment for the new level
-                            currentCPUProcess.currentQuantum = mlfqQuantums[currentCPUProcess.currentQueueLevel];
-                            currentCPUProcess.allotmentUsed = 0;
-                            mlfqQueues.get(currentCPUProcess.currentQueueLevel).add(currentCPUProcess); // Add to new queue
-                            actionMessageLabel.setText("MLFQ: Demoted " + currentCPUProcess.getFullPid() + " to Q" + currentCPUProcess.currentQueueLevel + " at time " + currentTime);
-                        } else {
-                            // Already in lowest priority queue, put it back to end of same queue
-                            mlfqQueues.get(currentCPUProcess.currentQueueLevel).add(currentCPUProcess);
-                            currentCPUProcess.currentQuantum = mlfqQuantums[currentCPUProcess.currentQueueLevel]; // Reset quantum for this level
-                            currentCPUProcess.allotmentUsed = 0; // Reset allotment for this level
-                            actionMessageLabel.setText("MLFQ: Quantum/Allotment expired for " + currentCPUProcess.getFullPid() + " in Q" + currentCPUProcess.currentQueueLevel + " at time " + currentTime);
-                        }
-                        currentCPUProcess = null; // Force selection from queues
-                    } else {
-                        processToRun = currentCPUProcess; // Continue if quantum/allotment not expired
-                    }
+
+        // 3. Execute the selected process for 1 time unit, or mark CPU as idle
+        if (currentCPUProcess != null) { // If there's a process to run
+            if (currentCPUProcess.getRemainingBurstTime() > 0) {
+                // Set response time if this is the first time the process gets CPU
+                if (currentCPUProcess.responseTime == -1) {
+                    currentCPUProcess.responseTime = currentTime - currentCPUProcess.arrivalTime;
+                }
+                // Decrement remaining burst time
+                currentCPUProcess.setRemainingBurstTime(currentCPUProcess.getRemainingBurstTime() - 1);
+
+                // Add the process's block to the Gantt Chart sequence
+                if ("MLFQ".equals(selectedAlgo)) {
+                    ganttChartSequence.add(new GanttBlock(currentCPUProcess.pid, currentCPUProcess.currentQueueLevel));
+                } else {
+                    ganttChartSequence.add(new GanttBlock(currentCPUProcess.pid, -1)); // -1 for non-MLFQ
                 }
             }
-        }
 
-        // If no process running, or current process finished/preempted, select new one
-        if (processToRun == null || processToRun.remainingTime <= 0) {
-            switch (selectedAlgorithm) {
-                case "First Come First Serve" -> {
-                    // Find the process that arrived earliest among the "ready" ones (arrival <= currentTime)
-                    // and is not yet completed.
-                    Process nextFCFS = readyQueue.stream()
-                            .filter(p -> p.remainingTime > 0) // Only non-completed
-                            .min(Comparator.comparingInt(p -> p.arrivalTime))
-                            .orElse(null);
-                    if (nextFCFS != null) readyQueue.remove(nextFCFS); // Remove from queue
-                    processToRun = nextFCFS;
-                }
-                case "SJF" -> {
-                    // Non-preemptive, select shortest among all arrived and not completed
-                    Process nextSJF = currentSimulationProcesses.stream()
-                            .filter(p -> p.remainingTime > 0 && p.arrivalTime <= currentTime)
-                            .min(Comparator.comparingInt(p -> p.burstTime)) // Shortest burst time
-                            .orElse(null);
-                    processToRun = nextSJF;
-                }
-                case "SRTF" -> {
-                    // Select shortest remaining time among all arrived and not completed processes.
-                    Process nextSRTF = currentSimulationProcesses.stream()
-                            .filter(p -> p.remainingTime > 0 && p.arrivalTime <= currentTime)
-                            .min(Comparator.comparingInt(p -> p.remainingTime)) // Shortest remaining time
-                            .orElse(null);
-                    processToRun = nextSRTF;
-                }
-                case "Round Robin" -> {
-                    // Get next process from ready queue if available
-                    if (!readyQueue.isEmpty()) {
-                        processToRun = readyQueue.poll();
-                        currentProcessQuantumRemaining = Integer.parseInt(timeQuantumField.getText()); // Reset quantum
+            // 4. Check for process completion or preemption after executing for this tick
+            if (currentCPUProcess.getRemainingBurstTime() == 0) {
+                // Process has completed
+                currentCPUProcess.hasCompleted = true;
+                currentCPUProcess.completionTime = currentTime + 1; // Completed at end of this tick
+                currentCPUProcess.turnaroundTime = currentCPUProcess.completionTime - currentCPUProcess.arrivalTime;
+                currentCPUProcess.waitingTime = currentCPUProcess.turnaroundTime - currentCPUProcess.burstTime;
+
+                // For MLFQ, if a process completes, it's done. Remove it from any queue it might still be in.
+                if ("MLFQ".equals(selectedAlgo)) {
+                    for (Queue<Process> q : mlfqQueues) {
+                        q.remove(currentCPUProcess); // Safe to remove non-existent items
                     }
                 }
-                case "MLFQ" -> {
-                    // Find highest priority queue with a ready process
-                    for (Queue<Process> queue : mlfqQueues) {
-                        if (!queue.isEmpty()) {
-                            processToRun = queue.poll();
-                            // Reset quantum for its current level, if not already reset by demotion
-                            if (processToRun.currentQuantum == 0 || processToRun.currentQuantum == -1) { // -1 could mean it just got put back
-                                processToRun.currentQuantum = mlfqQuantums[processToRun.currentQueueLevel];
-                            }
-                            break; // Found a process, exit loop
-                        }
-                    }
-                }
-            }
-        }
 
-        // 3. Execute the chosen process for 1 time unit
-        if (processToRun != null && processToRun.remainingTime > 0) {
-            if (processToRun.startTime == -1) {
-                processToRun.startTime = currentTime; // Process started at the beginning of this second
-                processToRun.responseTime = processToRun.startTime - processToRun.arrivalTime; // Calculate response time
-            }
-            processToRun.remainingTime--;
-            currentCPUProcess = processToRun; // Set current CPU process
-            currentRunningProcessPID = processToRun.getFullPid();
-
-            // Store PID for Gantt Chart (with MLFQ level if applicable)
-            if ("MLFQ".equals(selectedAlgorithm)) {
-                ganttChartSequence.add(processToRun.getFullPid() + "(Q" + processToRun.currentQueueLevel + ")");
+                currentCPUProcess = null; // CPU is now free
+                currentProcessQuantumRemaining = 0; // Reset quantum for next process
             } else {
-                ganttChartSequence.add(processToRun.getFullPid());
-            }
-
-            actionMessageLabel.setText("Running: " + processToRun.getFullPid() + " at time " + currentTime);
-
-            // If process completed in this tick
-            if (processToRun.remainingTime == 0) {
-                processToRun.completionTime = currentTime + 1; // Completed at the end of current second
-                processToRun.calculateFinalMetrics(); // Calculate TAT, WT, RT
-                currentRunningProcessPID = "None"; // CPU is free
-                actionMessageLabel.setText(processToRun.getFullPid() + " completed at time " + processToRun.completionTime);
-
-                // If MLFQ, ensure it's removed from all queues (shouldn't be in any, but just in case)
-                if ("MLFQ".equals(selectedAlgorithm)) {
-                    for(Queue<Process> q : mlfqQueues) {
-                        q.remove(processToRun);
+                // Process is still running, handle preemption or quantum exhaustion for RR/MLFQ
+                if ("Round Robin".equals(selectedAlgo)) {
+                    currentProcessQuantumRemaining--;
+                    if (currentProcessQuantumRemaining == 0) {
+                        // Quantum exhausted, preempt and re-add to end of queue
+                        Queue.offer(currentCPUProcess);
+                        currentCPUProcess = null; // CPU is free for next tick to pick from queue
+                    }
+                } else if ("MLFQ".equals(selectedAlgo)) {
+                    currentProcessQuantumRemaining--;
+                    if (currentProcessQuantumRemaining == 0) {
+                        // Quantum exhausted, demote process (demotion logic handles re-adding to a queue)
+                        demoteMLFQProcess(currentCPUProcess);
+                        currentCPUProcess = null; // CPU is free for next tick
                     }
                 }
-                currentCPUProcess = null; // No process running if it just completed
             }
-        } else {
-            // CPU is idle
-            currentCPUProcess = null;
-            currentRunningProcessPID = "Idle";
-            ganttChartSequence.add("Idle"); // Add 'Idle' to Gantt chart
-            actionMessageLabel.setText("CPU is Idle at time " + currentTime);
+        } else { 
+            ganttChartSequence.add(new GanttBlock("Idle", -1)); // Add an "Idle" block for this tick
         }
 
-        // Increment global time *after* processing the current tick
-        // This makes currentTime reflect the elapsed time correctly for the *next* second.
-        currentTime++;
+        // --- Update waiting times and advance simulation time ---
+        updateWaitingTimes(); // Processes waiting in queues accumulate wait time
 
-        // 4. Determine next in queue for display
+        currentTime++; // Advance simulation time by one unit
+
+        // --- Update GUI elements ---
+        updateLiveStatusTable();
+        updateMetricsDisplay();
+        ganttChartPanel.revalidate(); // Re-calculate preferred size as Gantt chart grows
+        ganttChartPanel.repaint(); // Redraw Gantt chart
+
+        // Auto-scroll Gantt chart to the right as it grows
+        JScrollBar hScrollBar = ganttScrollPane.getHorizontalScrollBar();
+        if (hScrollBar != null) {
+            hScrollBar.setValue(hScrollBar.getMaximum());
+        }
+
+        // --- Check if all processes are completed to stop simulation ---
+        boolean allCompleted = currentSimulationProcesses.stream().allMatch(p -> p.hasCompleted);
+        if (allCompleted) {
+            simulationTimer.stop();
+            simulateButton.setText("Simulate");
+            actionMessageLabel.setText("Simulation Finished. Total Time: " + currentTime);
+        }
+    }
+
+    private void updateNextInQueueDisplay(String selectedAlgo) {
         nextInQueuePID = "None";
-        switch (selectedAlgorithm) {
-            case "First Come First Serve", "Round Robin" -> {
-                if (!readyQueue.isEmpty()) {
-                    nextInQueuePID = readyQueue.peek().getFullPid();
-                }
-            }
-            case "SJF", "SRTF" -> {
-                Process nextCandidateShortest = currentSimulationProcesses.stream()
-                        .filter(p -> p.remainingTime > 0 && p.arrivalTime <= currentTime && !p.isCompleted() && !p.equals(currentCPUProcess))
-                        .min(Comparator.comparingInt(p -> "SJF".equals(selectedAlgorithm) ? p.burstTime : p.remainingTime))
-                        .orElse(null);
-                if (nextCandidateShortest != null) {
-                    nextInQueuePID = nextCandidateShortest.getFullPid();
+        switch (selectedAlgo) {
+            case "First Come First Serve", "Round Robin", "SJF", "SRTF" -> {
+                if (Queue != null && !Queue.isEmpty()) {
+                    nextInQueuePID = Queue.peek().pid;
                 }
             }
             case "MLFQ" -> {
-                for (Queue<Process> queue : mlfqQueues) {
-                    if (!queue.isEmpty()) {
-                        nextInQueuePID = queue.peek().getFullPid() + "(Q" + queue.peek().currentQueueLevel + ")";
-                        break;
+                for (Queue<Process> q : mlfqQueues) {
+                    if (!q.isEmpty()) {
+                        nextInQueuePID = q.peek().pid + " (Q" + mlfqQueues.indexOf(q) + ")";
+                        break; // Found the highest priority non-empty queue
                     }
                 }
             }
         }
+    }
 
-        // 5. Update GUI
-        updateLiveStatusTable();
-        updateMetricsDisplay();
-        currentCPULabel.setText("CPU : " + currentRunningProcessPID); // T is now implicit
-        nextQueueLabel.setText("Next Queue : " + nextInQueuePID);
-
-        ganttChartPanel.revalidate();
-        ganttChartPanel.repaint();
-
-        // 6. Check for simulation completion
-        if (allProcessesCompleted()) {
-            simulationTimer.stop();
-            simulateButton.setText("Simulate");
-            actionMessageLabel.setText("Simulation Finished at time " + (currentTime -1) + "."); // Time is one past completion
-            updateMetricsDisplay(); // Final update
+    private void updateWaitingTimes() {
+        for (Process p : currentSimulationProcesses) {
+            if (!p.hasCompleted && p.hasArrived && p != currentCPUProcess) {
+                p.waitingTime++;
+            }
         }
     }
 
-    private boolean allProcessesCompleted() {
-        if (currentSimulationProcesses == null || currentSimulationProcesses.isEmpty()) {
-            return definedProcesses.isEmpty();
+    private Process FCFS(Process previouslyRunningProcess) {
+        if (previouslyRunningProcess != null && !previouslyRunningProcess.hasCompleted) {
+            // FCFS is non-preemptive, so if a process is running, let it finish
+            return previouslyRunningProcess;
+        } else {
+            // CPU is idle or previous process finished, pick next from queue
+            if (Queue != null && !Queue.isEmpty()) {
+                return Queue.poll();
+            }
         }
-        return currentSimulationProcesses.stream().allMatch(Process::isCompleted);
+        return null; // No process to run
     }
 
-    private void updateMetricsDisplay() {
-        double totalWaitingTime = 0;
-        double totalTurnaroundTime = 0;
-        double totalResponseTime = 0;
-        double totalActualBurstTime = 0; // Sum of original burst times for average
-        int completedProcessesCount = 0;
-        int totalOriginalBurstTimeForProgress = 0; // For overall progress bar
+    private Process SJF(Process previouslyRunningProcess) {
+        if (previouslyRunningProcess != null && !previouslyRunningProcess.hasCompleted) {
+            // SJF is non-preemptive, so if a process is running, let it finish
+            return previouslyRunningProcess;
+        } else {
+            // CPU is idle or previous process finished, pick shortest job from queue
+            if (Queue != null && !Queue.isEmpty()) {
+                // PriorityQueue naturally handles shortest remaining time first if comparator is set
+                return Queue.poll();
+            }
+        }
+        return null; // No process to run
+    }
 
-        for (Process p : definedProcesses) {
-            totalOriginalBurstTimeForProgress += p.burstTime;
+    private Process SRTF(Process previouslyRunningProcess) {
+        // SRTF is preemptive. Always check if a new arriving process or
+        // a process in the queue has a shorter remaining time than the current one.
+
+        // Get all available processes (arrived and not completed)
+        List<Process> availableProcesses = currentSimulationProcesses.stream()
+                .filter(p -> p.hasArrived && !p.hasCompleted)
+                .collect(Collectors.toList());
+
+        // Add current CPU process back to candidates for re-evaluation if it was running
+        if (previouslyRunningProcess != null && !previouslyRunningProcess.hasCompleted) {
+            availableProcesses.add(previouslyRunningProcess);
         }
 
-        if (currentSimulationProcesses != null) {
-            for (Process p : currentSimulationProcesses) {
-                if (p.isCompleted()) {
-                    totalWaitingTime += p.waitingTime;
-                    totalTurnaroundTime += p.turnaroundTime;
-                    totalResponseTime += p.responseTime;
-                    totalActualBurstTime += p.burstTime; // Sum of original burst times for completed
-                    completedProcessesCount++;
-                }
+        Process bestCandidate = null;
+        int shortestTime = Integer.MAX_VALUE;
+
+        // Find the process with the shortest remaining burst time among available ones
+        for (Process p : availableProcesses) {
+            if (p.getRemainingBurstTime() < shortestTime) {
+                shortestTime = p.getRemainingBurstTime();
+                bestCandidate = p;
             }
         }
 
-        double avgWait = (completedProcessesCount > 0) ? totalWaitingTime / completedProcessesCount : 0.0;
-        double avgExec = (completedProcessesCount > 0) ? totalActualBurstTime / completedProcessesCount : 0.0;
-        double avgTAT = (completedProcessesCount > 0) ? totalTurnaroundTime / completedProcessesCount : 0.0;
-        double avgRT = (completedProcessesCount > 0) ? totalResponseTime / completedProcessesCount : 0.0;
+        // If the best candidate is different from the currently running process,
+        // or if there was no previously running process, take the best candidate.
+        if (bestCandidate != null && bestCandidate != previouslyRunningProcess) {
+            // If there was a previously running process, and it's not the best candidate,
+            // put it back into the general queue for SRTF re-evaluation later if needed.
+            if (previouslyRunningProcess != null && previouslyRunningProcess.getRemainingBurstTime() > 0 && !previouslyRunningProcess.hasCompleted) {
+                // Only add it back if it's not already in the queue AND if it's not the new best candidate
+                if (!Queue.contains(previouslyRunningProcess)) {
+                    Queue.offer(previouslyRunningProcess);
+                }
+            }
+            // Remove the chosen bestCandidate from the queue to prevent re-adding it
+            Queue.remove(bestCandidate);
+            return bestCandidate;
+        } else if (previouslyRunningProcess != null && !previouslyRunningProcess.hasCompleted) {
+            // If the previously running process is still the best, continue running it
+            return previouslyRunningProcess;
+        }
 
-        // Overall progress based on total elapsed time vs. total expected burst time
-        double overallProgress = (totalOriginalBurstTimeForProgress > 0) ? ((double) (currentTime -1) / totalOriginalBurstTimeForProgress) * 100 : 0.0;
-        overallProgress = Math.min(overallProgress, 100.0); // Cap at 100%
+        return null; // No process to run
+    }
 
-        avgWaitingTimeLabel.setText(String.format("Average Waiting Time : %.2f", avgWait));
-        avgExecutionTimeLabel.setText(String.format("Average Burst Time : %.2f", avgExec));
-        avgTurnaroundTimeLabel.setText(String.format("Average Turnaround Time : %.2f", avgTAT));
-        avgResponseTimeLabel.setText(String.format("Average Response Time : %.2f", avgRT));
-        totalExecutionTimeLabel.setText("Total Simulation Time : " + (currentTime -1)); // Display actual elapsed time
 
-        overallProgressBar.setValue((int) Math.round(overallProgress));
-        overallProgressBar.setString(String.format("%.2f%%", overallProgress));
+    private Process RoundRobin(Process previouslyRunningProcess) {
+        if (currentCPUProcess == null || currentCPUProcess.hasCompleted || currentProcessQuantumRemaining == 0) {
+            // If CPU is idle, previous process completed, or quantum expired
+            if (previouslyRunningProcess != null && previouslyRunningProcess.getRemainingBurstTime() > 0 && !previouslyRunningProcess.hasCompleted) {
+                // If quantum expired, previous process was already put back in queue by simulationTick
+                // If previous process completed, it's null now or will be set null
+            }
+
+            if (Queue != null && !Queue.isEmpty()) {
+                Process nextProcess = Queue.poll();
+                try {
+                    currentProcessQuantumRemaining = Integer.parseInt(timeQuantumField.getText().trim());
+                    if (currentProcessQuantumRemaining <= 0) {
+                        JOptionPane.showMessageDialog(this, "Round Robin Time Quantum must be greater than 0.", "Input Error", JOptionPane.ERROR_MESSAGE);
+                        resetSimulation();
+                        return null;
+                    }
+                } catch (NumberFormatException ex) {
+                    JOptionPane.showMessageDialog(this, "Invalid number for Time Quantum.", "Input Error", JOptionPane.ERROR_MESSAGE);
+                    resetSimulation();
+                    return null;
+                }
+                return nextProcess;
+            }
+        }
+        return previouslyRunningProcess; // Continue current process
+    }
+
+    private Process MLFQ(Process previouslyRunningProcess) {
+        // Check if previously running process needs to be re-evaluated
+        if (previouslyRunningProcess != null && !previouslyRunningProcess.hasCompleted) {
+            if (currentProcessQuantumRemaining == 0) {
+                // Demotion handled in simulationTick. previouslyRunningProcess is now null after demotion.
+            } else {
+                // Still has quantum remaining, continue running
+                return previouslyRunningProcess;
+            }
+        }
+
+        // Find the highest priority non-empty queue
+        for (int i = 0; i < mlfqQueues.size(); i++) {
+            Queue<Process> currentQueue = mlfqQueues.get(i);
+            if (!currentQueue.isEmpty()) {
+                Process nextProcess = currentQueue.poll();
+                nextProcess.currentQueueLevel = i; // Update the process's current queue level
+
+                // Set quantum for the current process based on its queue level
+                currentProcessQuantumRemaining = mlfqQuantums[i];
+                return nextProcess;
+            }
+        }
+        return null; // No process to run
+    }
+
+    private void demoteMLFQProcess(Process p) {
+        if (p == null || p.hasCompleted) return;
+
+        // Increment current_allotment_time for the process based on the quantum of the queue it just left
+        p.currentAllotmentTime += mlfqQuantums[p.currentQueueLevel];
+
+        // Check if allotment is exceeded for its *current* queue level
+        boolean allotmentExceeded = (p.currentAllotmentTime >= mlfqAllotments[p.currentQueueLevel]);
+
+        if (p.currentQueueLevel < mlfqQueues.size() - 1 && allotmentExceeded) {
+            // Demote to the next queue if allotment exceeded and not the lowest queue
+            p.currentQueueLevel++;
+            mlfqQueues.get(p.currentQueueLevel).offer(p);
+            p.currentAllotmentTime = 0; // Reset allotment time for the new queue level
+            actionMessageLabel.setText("Process " + p.pid + " demoted to Q" + p.currentQueueLevel);
+        } else {
+            // If already in the lowest queue (Q3) or allotment not exceeded,
+            // re-add to the end of its current queue (Round Robin within the queue)
+            mlfqQueues.get(p.currentQueueLevel).offer(p);
+            // No reset of allotment time if not demoted
+            actionMessageLabel.setText("Process " + p.pid + " returned to Q" + p.currentQueueLevel);
+        }
     }
 
 
@@ -1121,114 +1143,85 @@ public class SchedulerGUI extends JFrame {
         currentTime = 0;
         currentRunningProcessPID = "None";
         nextInQueuePID = "None";
+        currentCPUProcess = null; // Reset currentCPUProcess on reset
+        currentProcessQuantumRemaining = 0;
         ganttChartSequence.clear();
-        currentCPUProcess = null;
+        processColors.clear(); // Clear colors on reset too
 
-        // Reset all defined processes to their initial state for a fresh run
-        for (Process p : definedProcesses) {
-            p.reset();
-        }
-        currentSimulationProcesses = null; // Clear the simulation-specific list
+        // Reset all processes to their initial state
+        definedProcesses.forEach(Process::reset);
+        currentSimulationProcesses = null; // Clear simulation processes
 
-        // Clear tables
-        // processDefinitionModel.setRowCount(0); // No, keep definitions
-        liveStatusModel.setRowCount(0); // Clear live status table
+        if (Queue != null) Queue.clear();
+        if (mlfqQueues != null) mlfqQueues.forEach(java.util.Queue::clear);
 
-        // Re-populate definition table from definedProcesses (they are reset)
-        updateProcessDefinitionTable(); // This will refresh and sort
-
-        updateMetricsDisplay(); // Reset metrics to zero
-        actionMessageLabel.setText("Simulation reset. Define processes and click Simulate.");
-
+        updateLiveStatusTable();
+        updateMetricsDisplay();
         ganttChartPanel.revalidate();
         ganttChartPanel.repaint();
+        actionMessageLabel.setText("Simulation reset. Define processes or click Simulate to start.");
     }
 
-    // Helper to get consistent color for a process PID
-    private Color getColorForProcess(String fullPid) {
-        return processColors.computeIfAbsent(fullPid, k -> {
-            Random rand = new Random();
-            float r = rand.nextFloat();
-            float g = rand.nextFloat();
-            float b = rand.nextFloat();
-            // Avoid very light colors that blend with white background, and too dark
-            return new Color(r, g, b).brighter().brighter(); // Ensures some brightness
-        });
+    // Helper to get consistent colors for processes
+    private Color getColorForProcess(String pid) {
+        return processColors.computeIfAbsent(pid, k -> new Color(
+                (int) (Math.random() * 255),
+                (int) (Math.random() * 255),
+                (int) (Math.random() * 255)
+        ).brighter()); // Ensure it's a bit brighter
     }
 
     private void drawGanttChart(Graphics g) {
-        Graphics2D g2d = (Graphics2D) g;
-        g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        int yOffset = GANTT_ROW_HEIGHT + 5; // Start drawing blocks below the time axis
 
-        int blockWidth = GANTT_BLOCK_WIDTH;
-        int rowHeight = GANTT_ROW_HEIGHT;
-        int yTimeAxis = 15; // Y position for time numbers
+        // Draw time axis
+        g.setColor(Color.BLACK);
+        g.setFont(new Font("SansSerif", Font.PLAIN, 10));
+        FontMetrics fm = g.getFontMetrics(); // Get FontMetrics once for efficiency
 
-        // Draw Time Axis
-        g2d.setColor(Color.DARK_GRAY);
-        g2d.drawLine(0, GANTT_TIME_AXIS_HEIGHT, getWidth(), GANTT_TIME_AXIS_HEIGHT); // Horizontal line for axis
-        // Draw up to currentTime (exclusive), then the current time (inclusive)
-        int maxTimeOnAxis = currentTime > 0 ? currentTime : 0;
-        for (int i = 0; i <= maxTimeOnAxis +1 ; i++) { // +1 to ensure current time tick is drawn
+        for (int i = 0; i <= currentTime; i++) {
+            int x = i * GANTT_BLOCK_WIDTH;
+            g.drawLine(x, GANTT_ROW_HEIGHT + 2, x, GANTT_ROW_HEIGHT + 7); // Tick mark
+
             String timeStr = String.valueOf(i);
-            FontMetrics fm = g2d.getFontMetrics();
-            int textWidth = fm.stringWidth(timeStr);
-            g2d.drawString(timeStr, i * blockWidth - textWidth / 2, yTimeAxis); // Centered time label
-            if (i > 0) {
-                g2d.drawLine(i * blockWidth, GANTT_TIME_AXIS_HEIGHT - 5, i * blockWidth, GANTT_TIME_AXIS_HEIGHT + 5); // Tick marks
-            }
+            int stringWidth = fm.stringWidth(timeStr);
+
+            // Calculate x position to center the string on the tick mark
+            int textX = x - (stringWidth / 2);
+
+            g.drawString(timeStr, textX, GANTT_ROW_HEIGHT - 5); // Time label
         }
 
-        int yBlockStart = GANTT_TIME_AXIS_HEIGHT + 10; // Start drawing blocks below the axis
-
-        // Draw Gantt blocks
-        int currentX = 0;
-        String selectedAlgorithm = (String) algorithmComboBox.getSelectedItem();
-
-        for (String ganttEntry : ganttChartSequence) {
-            String actualPid = ganttEntry;
-            String mlfqLevel = null;
-
-            // Extract MLFQ level if present
-            if ("MLFQ".equals(selectedAlgorithm) && ganttEntry.contains("(Q")) {
-                int levelStart = ganttEntry.indexOf("(Q");
-                mlfqLevel = ganttEntry.substring(levelStart);
-                actualPid = ganttEntry.substring(0, levelStart);
+        // Draw the Gantt chart blocks
+        for (int i = 0; i < ganttChartSequence.size(); i++) {
+            GanttBlock block = ganttChartSequence.get(i);
+            String displayId = block.processId;
+            if (block.queueLevel != -1) { // If it's an MLFQ process, show queue level
+                displayId += " (Q" + block.queueLevel + ")";
             }
 
-            Color processColor = getColorForProcess(actualPid);
-            g2d.setColor(processColor);
-            g2d.fillRect(currentX, yBlockStart, blockWidth, rowHeight); // Draw the block
+            int x = i * GANTT_BLOCK_WIDTH;
+            Color processColor = getColorForProcess(block.processId); // Get color based on original PID
 
-            g2d.setColor(Color.BLACK); // Text and border color
-            g2d.drawRect(currentX, yBlockStart, blockWidth, rowHeight); // Draw border
+            g.setColor(processColor);
+            g.fillRect(x, yOffset, GANTT_BLOCK_WIDTH, GANTT_ROW_HEIGHT);
+            g.setColor(Color.BLACK);
+            g.drawRect(x, yOffset, GANTT_BLOCK_WIDTH, GANTT_ROW_HEIGHT); // Border
 
-            // Draw PID in the center of the block
-            FontMetrics fm = g2d.getFontMetrics();
-            int textY = yBlockStart + ((rowHeight - fm.getHeight()) / 2) + fm.getAscent();
-
-            if (mlfqLevel != null) {
-                // Draw PID (smaller) and MLFQ level (smaller)
-                g2d.setFont(g2d.getFont().deriveFont(8f)); // Smaller font for PID
-                fm = g2d.getFontMetrics();
-                int pidTextWidth = fm.stringWidth(actualPid);
-                int pidTextX = currentX + (blockWidth - pidTextWidth) / 2;
-                g2d.drawString(actualPid, pidTextX, yBlockStart + fm.getAscent() + 2); // Slightly above center
-
-                g2d.setFont(g2d.getFont().deriveFont(8f)); // Smaller font for level
-                fm = g2d.getFontMetrics();
-                int levelTextWidth = fm.stringWidth(mlfqLevel);
-                int levelTextX = currentX + (blockWidth - levelTextWidth) / 2;
-                g2d.drawString(mlfqLevel, levelTextX, yBlockStart + rowHeight - 4); // Near bottom
-                g2d.setFont(g2d.getFont().deriveFont(Font.PLAIN, 12f)); // Reset font
+            // Draw PID (and queue level if MLFQ) in the center of the block
+            if (!"Idle".equals(block.processId)) {
+                int stringWidth = fm.stringWidth(displayId);
+                int stringHeight = fm.getHeight();
+                g.setColor(Color.BLACK); // Text color
+                g.drawString(displayId, x + (GANTT_BLOCK_WIDTH - stringWidth) / 2, yOffset + (GANTT_ROW_HEIGHT - stringHeight) / 2 + fm.getAscent());
             } else {
-                // Draw PID normally
-                int textWidth = fm.stringWidth(actualPid);
-                int textX = currentX + (blockWidth - textWidth) / 2;
-                g2d.drawString(actualPid, textX, textY);
+                // Draw "Idle" text instead of a line
+                String idleText = "Idle";
+                int stringWidth = fm.stringWidth(idleText);
+                int stringHeight = fm.getHeight();
+                g.setColor(Color.GRAY); // Choose a suitable color for Idle text
+                g.drawString(idleText, x + (GANTT_BLOCK_WIDTH - stringWidth) / 2, yOffset + (GANTT_ROW_HEIGHT - stringHeight) / 2 + fm.getAscent());
             }
-
-            currentX += blockWidth;
         }
     }
 
@@ -1237,7 +1230,7 @@ public class SchedulerGUI extends JFrame {
         JFileChooser fileChooser = new JFileChooser();
         fileChooser.setDialogTitle("Export Simulation Results");
         fileChooser.setFileFilter(new FileNameExtensionFilter("Text Files (*.txt)", "txt"));
-        fileChooser.setSelectedFile(new File("simulation_results.txt")); // Default file name
+        fileChooser.setSelectedFile(new File("simulation_results.txt"));
 
         int userSelection = fileChooser.showSaveDialog(this);
 
@@ -1249,154 +1242,186 @@ public class SchedulerGUI extends JFrame {
 
             try (BufferedWriter writer = new BufferedWriter(new FileWriter(fileToSave))) {
                 writer.write("CPU Scheduling Simulation Results\n");
-                writer.write("Developed By: Tenchavez Rieznick McCain G.\n");
-                writer.write("----------------------------------------------------------------\n");
-                writer.write("Algorithm: " + algorithmComboBox.getSelectedItem() + "\n");
+                writer.write("Developed by: TENCHAVEZ RIEZNICK MCCAIN G.\n");
+                writer.write("--------------------------------------------------\n");
+                writer.write("Algorithm Used: " + algorithmComboBox.getSelectedItem() + "\n");
                 if ("Round Robin".equals(algorithmComboBox.getSelectedItem())) {
-                    writer.write("Time Quantum: " + timeQuantumField.getText() + "\n");
-                } else if ("MLFQ".equals(algorithmComboBox.getSelectedItem())) {
-                    writer.write("MLFQ Quantums (Q0-Q3): " + mlfqQuantums[0] + ", " + mlfqQuantums[1] + ", " + mlfqQuantums[2] + ", " + mlfqQuantums[3] + "\n");
-                    writer.write("MLFQ Allotments (Q0-Q3): " + mlfqAllotments[0] + ", " + mlfqAllotments[1] + ", " + mlfqAllotments[2] + ", " + mlfqAllotments[3] + "\n");
+                    writer.write("Time Quantum (RR): " + timeQuantumField.getText() + "\n");
                 }
-                writer.write("Total Simulation Time: " + (currentTime - 1) + "\n");
-                writer.write("----------------------------------------------------------------\n\n");
-
-                // --- Gantt Chart ---
-                writer.write("Gantt Chart:\n");
-                StringBuilder ganttOutput = new StringBuilder();
-                StringBuilder timeAxis = new StringBuilder();
-                StringBuilder divider = new StringBuilder();
-
-                int currentGanttTime = 0;
-                for (String entry : ganttChartSequence) {
-                    ganttOutput.append(String.format("| %-3s ", entry));
-                    divider.append("------");
-                    timeAxis.append(String.format("%-6s", currentGanttTime));
-                    currentGanttTime++;
+                if ("MLFQ".equals(algorithmComboBox.getSelectedItem())) {
+                    writer.write("MLFQ Quantums: Q0=" + mlfqQuantums[0] + ", Q1=" + mlfqQuantums[1] + ", Q2=" + mlfqQuantums[2] + ", Q3=" + mlfqQuantums[3] + "\n");
+                    writer.write("MLFQ Allotments: Q0=" + mlfqAllotments[0] + ", Q1=" + mlfqAllotments[1] + ", Q2=" + mlfqAllotments[2] + ", Q3=" + mlfqAllotments[3] + "\n");
                 }
-                ganttOutput.append("|\n");
-                divider.append("-\n"); // for the last '|'
-                StringBuilder append = timeAxis.append(String.format("%-6s", currentGanttTime)).append("\n");
+                writer.write("Total Simulation Time: " + currentTime + "\n");
+                writer.write("--------------------------------------------------\n\n");
 
-                writer.write(divider.toString());
-                writer.write(ganttOutput.toString());
-                writer.write(divider.toString());
-                writer.write(timeAxis.toString());
-                writer.write("\n");
-
-                // --- Process Metrics Table ---
-                writer.write("Process Metrics:\n");
-                String header = String.format("%-10s %-10s %-10s %-10s %-10s %-10s %-10s\n",
-                                                "Process ID", "Arrival", "Burst", "Completion", "Turnaround", "Response", "Waiting");
-                writer.write(header);
-                writer.write(String.join("", Collections.nCopies(header.length() -1, "-")) + "\n");
-
-                for (Process p : currentSimulationProcesses) {
-                    writer.write(String.format("%-10s %-10d %-10d %-10d %-10d %-10d %-10d\n",
-                                                p.getFullPid(), p.arrivalTime, p.burstTime, p.completionTime,
-                                                p.turnaroundTime, p.responseTime, p.waitingTime));
+                writer.write("Process Definitions:\n");
+                writer.write(String.format("%-10s %-15s %-15s %-10s\n", "Process", "Arrival Time", "Exec. Time", "Priority"));
+                for (Process p : definedProcesses) {
+                    writer.write(String.format("%-10s %-15d %-15d %-10d\n", p.pid, p.arrivalTime, p.burstTime, p.priority));
                 }
                 writer.write("\n");
 
-                // --- Average Metrics ---
-                writer.write("Average Metrics:\n");
+                writer.write("Live Simulation Status (Final):\n");
+                writer.write(String.format("%-10s %-12s %-15s %-12s %-12s %-12s %-12s %-12s\n",
+                        "Process", "Status", "Completion %", "Rem. Time", "Wait Time", "Comp. Time", "TAT", "Resp. Time"));
+
+                // Ensure data in liveStatusModel reflects the final state
+                updateLiveStatusTable(); // Just to be sure the model is up-to-date
+                for (int i = 0; i < liveStatusModel.getRowCount(); i++) {
+                    String pid = (String) liveStatusModel.getValueAt(i, 0);
+                    String status = (String) liveStatusModel.getValueAt(i, 1);
+                    Object completion = liveStatusModel.getValueAt(i, 2);
+                    Object remTime = liveStatusModel.getValueAt(i, 3);
+                    Object waitTime = liveStatusModel.getValueAt(i, 4);
+                    Object compTime = liveStatusModel.getValueAt(i, 5);
+                    Object tat = liveStatusModel.getValueAt(i, 6);
+                    Object respTime = liveStatusModel.getValueAt(i, 7);
+
+                    writer.write(String.format("%-10s %-12s %-15s %-12s %-12s %-12s %-12s %-12s\n",
+                            pid, status,
+                            (completion instanceof Double) ? String.format("%.2f%%", (Double) completion) : completion.toString(),
+                            remTime.toString(), waitTime.toString(), compTime.toString(), tat.toString(), respTime.toString()));
+                }
+                writer.write("\n");
+
+                writer.write("Overall Metrics:\n");
                 writer.write(avgWaitingTimeLabel.getText() + "\n");
                 writer.write(avgExecutionTimeLabel.getText() + "\n");
                 writer.write(avgTurnaroundTimeLabel.getText() + "\n");
                 writer.write(avgResponseTimeLabel.getText() + "\n");
+                writer.write(totalExecutionTimeLabel.getText() + "\n");
+                writer.write("Overall Progress: " + overallProgressBar.getString() + "\n");
+                writer.write("\n");
 
-                JOptionPane.showMessageDialog(this, "Results exported successfully to:\n" + fileToSave.getAbsolutePath());
+                writer.write("Gantt Chart Sequence (PID and Queue Level at each time unit):\n");
+                for (int i = 0; i < ganttChartSequence.size(); i++) {
+                    GanttBlock block = ganttChartSequence.get(i);
+                    String display = block.processId;
+                    if(block.queueLevel != -1) {
+                        display += " (Q" + block.queueLevel + ")";
+                    }
+                    writer.write(String.format("Time %d: %s\n", i, display));
+                }
+
+                JOptionPane.showMessageDialog(this, "Simulation results exported successfully to:\n" + fileToSave.getAbsolutePath(), "Export Complete", JOptionPane.INFORMATION_MESSAGE);
 
             } catch (IOException ex) {
-                JOptionPane.showMessageDialog(this, "Error exporting results: " + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
+                JOptionPane.showMessageDialog(this, "Error exporting results: " + ex.getMessage(), "Export Error", JOptionPane.ERROR_MESSAGE);
             }
         }
     }
 
 
-    public static void main(String[] args) {
-        try {
-            UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
-        } catch (ClassNotFoundException | IllegalAccessException | InstantiationException | UnsupportedLookAndFeelException e) {
-        }
-
-        SwingUtilities.invokeLater(() -> new SchedulerGUI());
-    }
-
-    // --- Process Class ---
-    static final class Process {
+    // --- Inner class for Process definition ---
+    final class Process {
         String pid;
-        String extension;
         int arrivalTime;
         int burstTime;
-        int priority;
-        int remainingTime;
-        int startTime; // Time when process first starts execution (for Response Time)
-        int completionTime; // Time when process finishes
-        int waitingTime; // Total time spent waiting in ready queue
-        int turnaroundTime; // Completion Time - Arrival Time
-        int responseTime; // Start Time - Arrival Time
+        int priority; // For Priority Scheduling / MLFQ
 
-        // For MLFQ
-        int currentQueueLevel;
-        int currentQuantum; // Remaining quantum for current level (resets per level)
-        int allotmentUsed; // Used within current level's total allotment
+        // Simulation-specific fields
+        int remainingBurstTime;
+        int waitingTime;
+        int turnaroundTime;
+        int completionTime;
+        int responseTime; // Time from arrival to first execution
+        boolean hasArrived; // To track if process has arrived in simulation
+        boolean hasCompleted; // To track if process has completed
+        int currentQueueLevel; // For MLFQ: 0, 1, 2, 3
+        int currentAllotmentTime; // For MLFQ: time accumulated in current queue level
 
-        boolean hasArrived; // To track if process has been added to ready queue system
-
-        public Process(String pid, String extension, int arrivalTime, int burstTime, int priority) {
+        public Process(String pid, int arrivalTime, int burstTime, int priority) {
             this.pid = pid;
-            this.extension = extension;
             this.arrivalTime = arrivalTime;
             this.burstTime = burstTime;
             this.priority = priority;
-            reset(); // Initialize/reset all simulation-related fields
+            reset(); // Initialize simulation-specific fields
         }
 
-        // Copy constructor for simulation
+        // Copy constructor for simulation runs
         public Process(Process other) {
             this.pid = other.pid;
-            this.extension = other.extension;
             this.arrivalTime = other.arrivalTime;
             this.burstTime = other.burstTime;
             this.priority = other.priority;
-            reset(); // Copying should also start in a reset state for simulation
-        }
-
-        public String getFullPid() {
-            return pid + extension;
-        }
-
-        public boolean isCompleted() {
-            return remainingTime <= 0 && completionTime != -1;
-        }
-
-        public void calculateFinalMetrics() {
-            // These should be called when remainingTime becomes 0
-            if (this.completionTime != -1) {
-                this.turnaroundTime = this.completionTime - this.arrivalTime;
-                // Response time is calculated when startTime is first set
-                // Waiting time is accumulated per tick, so just ensure it's finalized
-            }
+            reset(); // Ensure reset for the copy
         }
 
         public void reset() {
-            this.remainingTime = this.burstTime;
-            this.startTime = -1; // -1 indicates not started yet
-            this.completionTime = -1; // -1 indicates not completed yet
+            this.remainingBurstTime = this.burstTime;
             this.waitingTime = 0;
             this.turnaroundTime = 0;
-            this.responseTime = 0; // Or -1 if not started
-
-            this.currentQueueLevel = 0; // Default for MLFQ
-            this.currentQuantum = -1; // Will be set when added to MLFQ queue
-            this.allotmentUsed = 0;
+            this.completionTime = 0;
+            this.responseTime = -1; // -1 indicates not yet responded
             this.hasArrived = false;
+            this.hasCompleted = false;
+            this.currentQueueLevel = 0; // All processes start in Q0 for MLFQ
+            this.currentAllotmentTime = 0; // Reset allotment time
+        }
+
+        public int getRemainingBurstTime() {
+            return remainingBurstTime;
+        }
+
+        public void setRemainingBurstTime(int remainingBurstTime) {
+            this.remainingBurstTime = remainingBurstTime;
         }
 
         @Override
         public String toString() {
-            return getFullPid();
+            return pid;
         }
+    }
+
+    // --- New Inner class for Gantt Chart Block ---
+    class GanttBlock {
+        String processId;
+        int queueLevel; // -1 if not MLFQ, otherwise 0-3
+
+        public GanttBlock(String processId, int queueLevel) {
+            this.processId = processId;
+            this.queueLevel = queueLevel;
+        }
+    }
+
+    // --- Inner class for JTable Progress Bar Renderer ---
+    class ProgressBarRenderer extends DefaultTableCellRenderer {
+        private final JProgressBar progressBar = new JProgressBar(0, 100);
+
+        public ProgressBarRenderer() {
+            progressBar.setStringPainted(true);
+            progressBar.setBorderPainted(true);
+        }
+
+        @Override
+        public Component getTableCellRendererComponent(JTable table, Object value, boolean isSelected, boolean hasFocus, int row, int column) {
+            Double progressValue = 0.0;
+            if (value instanceof Double aDouble) {
+                progressValue = aDouble;
+            } else if (value instanceof Integer integer) {
+                progressValue = integer.doubleValue();
+            }
+
+            progressBar.setValue(progressValue.intValue());
+            progressBar.setString(String.format("%.2f%%", progressValue));
+
+            // Set color based on progress (e.g., green for completed, blue for active)
+            if (progressValue >= 100.0) {
+                progressBar.setForeground(new Color(0, 150, 0)); // Dark green
+            } else if (progressValue > 0) {
+                progressBar.setForeground(new Color(50, 100, 200)); // Medium blue
+            } else {
+                progressBar.setForeground(Color.LIGHT_GRAY); // Grey for 0%
+            }
+
+            return progressBar;
+        }
+    }
+
+    // --- Main method to run the GUI ---
+    public static void main(String[] args) {
+        // Ensure GUI updates are done on the Event Dispatch Thread
+        SwingUtilities.invokeLater(SchedulerGUI::new);
     }
 }
