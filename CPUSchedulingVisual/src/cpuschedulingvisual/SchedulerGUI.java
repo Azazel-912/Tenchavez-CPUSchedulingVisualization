@@ -1397,10 +1397,11 @@ public class SchedulerGUI extends JFrame {
         @Override
         public Component getTableCellRendererComponent(JTable table, Object value, boolean isSelected, boolean hasFocus, int row, int column) {
             Double progressValue = 0.0;
-            if (value instanceof Double aDouble) {
-                progressValue = aDouble;
-            } else if (value instanceof Integer integer) {
-                progressValue = integer.doubleValue();
+            switch (value) {
+                case Double aDouble -> progressValue = aDouble;
+                case Integer integer -> progressValue = integer.doubleValue();
+                default -> {
+                }
             }
 
             progressBar.setValue(progressValue.intValue());
