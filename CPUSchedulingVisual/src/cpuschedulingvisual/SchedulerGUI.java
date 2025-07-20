@@ -253,12 +253,14 @@ public class SchedulerGUI extends JFrame {
         simulationSpeedSlider.setPaintLabels(true);
         // Custom labels for speed (inverted: lower ms = faster)
         Hashtable<Integer, JLabel> labelTable = new Hashtable<>();
-        labelTable.put(50, new JLabel("x100")); 
+        labelTable.put(50, new JLabel("<html>x100<br>(Fast)</html>")); 
         labelTable.put(300, new JLabel("x10"));
         labelTable.put(500, new JLabel("x5"));
         labelTable.put(750, new JLabel("x2"));
-        labelTable.put(1000, new JLabel("x1")); 
+        labelTable.put(1000, new JLabel("<html>x1<br>(Slow)</html>"));
         simulationSpeedSlider.setLabelTable(labelTable);
+        // Set a smaller preferred width for the slider to prevent it from pushing buttons down
+        simulationSpeedSlider.setPreferredSize(new Dimension(220, simulationSpeedSlider.getPreferredSize().height)); 
 
 
         simulateButton = new JButton("Simulate");
@@ -426,15 +428,15 @@ public class SchedulerGUI extends JFrame {
         rightPanel.add(metricsPanel, BorderLayout.CENTER);
 
         // Bottom-Right: Simulation Controls
-        JPanel controlPanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 10, 10));
-        controlPanel.setBackground(CREAM);
-        controlPanel.setBorder(BorderFactory.createTitledBorder("Simulation Controls"));
-        controlPanel.add(new JLabel("Simulation Speed:"));
-        controlPanel.add(simulationSpeedSlider);
-        controlPanel.add(simulateButton);
-        controlPanel.add(resetButton);
-        controlPanel.add(exportResultsBtn); // New Export button
-        rightPanel.add(controlPanel, BorderLayout.SOUTH);
+         JPanel speedControlWrapperPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0)); 
+        speedControlWrapperPanel.setBackground(CREAM);
+        speedControlWrapperPanel.setBorder(BorderFactory.createEmptyBorder(0, 5, 0, 0)); 
+        speedControlWrapperPanel.add(new JLabel("Simulation Speed:"));
+        speedControlWrapperPanel.add(simulationSpeedSlider);
+        speedControlWrapperPanel.add(simulateButton);
+        speedControlWrapperPanel.add(resetButton);
+        speedControlWrapperPanel.add(exportResultsBtn); 
+        rightPanel.add( speedControlWrapperPanel, BorderLayout.SOUTH);
 
         add(rightPanel, BorderLayout.CENTER); // Add the whole right panel to the main frame
 
