@@ -32,7 +32,7 @@ public class SchedulerGUI extends JFrame {
     private JComboBox<String> processNameDropdown;
     private JTextField randomLengthField;
     private JButton enqueueButton, dequeueButton, updateButton, generateRandomBtn;
-
+    private JButton dequeueAllButton;
     // Left Panels - Process Definition Table
     private JTable processDefinitionTable;
     private DefaultTableModel processDefinitionModel;
@@ -137,6 +137,7 @@ public class SchedulerGUI extends JFrame {
         enqueueButton = new JButton("Enqueue");
         dequeueButton = new JButton("Dequeue");
         updateButton = new JButton("Update");
+        dequeueAllButton = new JButton("Dequeue All");
 
         // Process Definition Table
         processDefinitionModel = new DefaultTableModel(
@@ -270,6 +271,25 @@ public class SchedulerGUI extends JFrame {
         // Initialize simulation timer (not started yet)
         simulationTimer = new Timer(simulationSpeed, this::simulationTick);
     }
+    private void dequeueAllProcesses() {
+    if (definedProcesses.isEmpty()) {
+        JOptionPane.showMessageDialog(this, "No processes to dequeue.", "Information", JOptionPane.INFORMATION_MESSAGE);
+        return;
+    }
+
+    int confirm = JOptionPane.showConfirmDialog(this,
+            "Are you sure you want to dequeue all defined processes? This will also reset the simulation.",
+            "Confirm Dequeue All", JOptionPane.YES_NO_OPTION);
+
+    if (confirm == JOptionPane.YES_OPTION) {
+        definedProcesses.clear(); // Clear the list of defined processes
+        processColors.clear(); // Clear process colors as well
+        updateProcessDefinitionTable(); // Update the table display
+        updateProcessDefinitionDropdown(); // Update the dropdown
+        resetSimulation(); // Reset the simulation state
+        actionMessageLabel.setText("All processes dequeued and simulation reset.");
+    }
+}
 
     private void setupLayout() {
         // --- Left Panel (Process Definition, Algorithm, Gantt) ---
@@ -313,6 +333,7 @@ public class SchedulerGUI extends JFrame {
         processActionButtonsPanel.setBackground(CREAM);
         processActionButtonsPanel.add(enqueueButton);
         processActionButtonsPanel.add(dequeueButton);
+        processActionButtonsPanel.add(dequeueAllButton);
         processActionButtonsPanel.add(updateButton);
         processInputSection.add(processActionButtonsPanel, BorderLayout.SOUTH);
 
@@ -450,7 +471,7 @@ public class SchedulerGUI extends JFrame {
         dequeueButton.addActionListener(e -> deleteSelectedProcess());
         updateButton.addActionListener(e -> updateSelectedProcess());
         generateRandomBtn.addActionListener(e -> generateRandomProcesses());
-
+        dequeueAllButton.addActionListener(e -> dequeueAllProcesses());
         // Simulation Control Buttons
         simulateButton.addActionListener(e -> toggleSimulation());
         resetButton.addActionListener(e -> resetSimulation());
